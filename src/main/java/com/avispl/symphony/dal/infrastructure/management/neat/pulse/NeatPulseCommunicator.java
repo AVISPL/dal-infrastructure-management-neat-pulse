@@ -9,28 +9,41 @@ import java.net.ConnectException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.util.CollectionUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import javax.security.auth.login.FailedLoginException;
 
 import com.avispl.symphony.api.dal.control.Controller;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.Statistics;
 import com.avispl.symphony.api.dal.dto.monitor.aggregator.AggregatedDevice;
+import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
 import com.avispl.symphony.api.dal.monitor.Monitorable;
 import com.avispl.symphony.api.dal.monitor.aggregator.Aggregator;
 import com.avispl.symphony.dal.communicator.RestCommunicator;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseCommand;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseConstant;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.PingMode;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceInfo;
+import com.avispl.symphony.dal.util.StringUtils;
 
 
 public class NeatPulseCommunicator extends RestCommunicator implements Aggregator, Monitorable, Controller {
@@ -72,6 +85,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				}
 				long currentTimestamp = System.currentTimeMillis();
 				if (!flag && nextDevicesCollectionIterationTimestamp <= currentTimestamp) {
+					populateDeviceDetails();
 					flag = true;
 				}
 
@@ -87,7 +101,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					break loop;
 				}
 				if (flag) {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 30000;
+					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000;
 					flag = false;
 				}
 
@@ -155,9 +169,51 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private NurevaConsoleDataLoader deviceDataLoader;
 
 	/**
+	 * A private final ReentrantLock instance used to provide exclusive access to a shared resource
+	 * that can be accessed by multiple threads concurrently. This lock allows multiple reentrant
+	 * locks on the same shared resource by the same thread.
+	 */
+	private final ReentrantLock reentrantLock = new ReentrantLock();
+
+	/**
 	 * Private variable representing the local extended statistics.
 	 */
 	private ExtendedStatistics localExtendedStatistics;
+
+	/**
+	 * List of aggregated device
+	 */
+	private List<AggregatedDevice> aggregatedDeviceList = Collections.synchronizedList(new ArrayList<>());
+
+	/**
+	 * Cached data
+	 */
+	private Map<String, Map<String, String>> cachedMonitoringDevice = Collections.synchronizedMap(new HashMap<>());
+
+	/**
+	 * list of all devices
+	 */
+	private List<String> deviceList = Collections.synchronizedList(new ArrayList<>());
+
+	/**
+	 * number of rooms
+	 */
+	private int countRoom;
+
+	/**
+	 * number of threads
+	 */
+	private Integer numberThreads;
+
+	/**
+	 * start index
+	 */
+	private int startIndex = NeatPulseConstant.START_INDEX;
+
+	/**
+	 * end index
+	 */
+	private int endIndex = NeatPulseConstant.NUMBER_DEVICE_IN_INTERVAL;
 
 	/**
 	 * ping mode
@@ -180,6 +236,24 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	public void setPingMode(String pingMode) {
 		this.pingMode = PingMode.ofString(pingMode);
+	}
+
+	/**
+	 * Retrieves {@link #numberThreads}
+	 *
+	 * @return value of {@link #numberThreads}
+	 */
+	public Integer getNumberThreads() {
+		return numberThreads;
+	}
+
+	/**
+	 * Sets {@link #numberThreads} value
+	 *
+	 * @param numberThreads new value of {@link #numberThreads}
+	 */
+	public void setNumberThreads(Integer numberThreads) {
+		this.numberThreads = numberThreads;
 	}
 
 	/**
@@ -248,7 +322,22 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	@Override
 	public List<Statistics> getMultipleStatistics() throws Exception {
-		return null;
+		reentrantLock.lock();
+		try {
+			if (StringUtils.isNullOrEmpty(this.getLogin())) {
+				throw new ResourceNotReachableException("Please check Organization Id in Username field");
+			}
+			Map<String, String> statistics = new HashMap<>();
+			ExtendedStatistics extendedStatistics = new ExtendedStatistics();
+			retrieveSystemInfo();
+			retrieveRoomInfo();
+			populateSystemInfo(statistics);
+			extendedStatistics.setStatistics(statistics);
+			localExtendedStatistics = extendedStatistics;
+		} finally {
+			reentrantLock.unlock();
+		}
+		return Collections.singletonList(localExtendedStatistics);
 	}
 
 	/**
@@ -298,6 +387,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	@Override
 	protected HttpHeaders putExtraRequestHeaders(HttpMethod httpMethod, String uri, HttpHeaders headers) {
+		headers.setBearerAuth(this.getPassword());
 		return headers;
 	}
 
@@ -343,6 +433,184 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			localExtendedStatistics.getControllableProperties().clear();
 		}
 		nextDevicesCollectionIterationTimestamp = 0;
+		aggregatedDeviceList.clear();
+		cachedMonitoringDevice.clear();
+		deviceList.clear();
 		super.internalDestroy();
+	}
+
+	/**
+	 * Retrieves system information by sending a request to the NeatPulse API.
+	 * This method populates the deviceList with the IDs of the available devices.
+	 *
+	 * @throws FailedLoginException If there's an issue with the login credentials. This could happen if the password is incorrect.
+	 * @throws ResourceNotReachableException If there's an error reaching the NeatPulse API or retrieving system information.
+	 */
+	private void retrieveSystemInfo() throws Exception {
+		try {
+			deviceList.clear();
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
+			if (response != null && response.has(NeatPulseConstant.ENDPOINTS) && response.get(NeatPulseConstant.ENDPOINTS).isArray()) {
+				for (JsonNode node : response.get(NeatPulseConstant.ENDPOINTS)) {
+					deviceList.add(node.get(NeatPulseConstant.ID).asText());
+				}
+			}
+		} catch (FailedLoginException e) {
+			throw new FailedLoginException("Error when the login. Please check the password");
+		} catch (Exception ex) {
+			throw new ResourceNotReachableException(String.format("Error when retrieve system information. %s", ex.getMessage()), ex);
+		}
+	}
+
+	/**
+	 * Retrieves room information by sending a request to the NeatPulse API.
+	 * This method updates the countRoom variable with the number of available rooms.
+	 *
+	 * @throws ResourceNotReachableException If there's an error reaching the NeatPulse API or retrieving room information.
+	 */
+	private void retrieveRoomInfo() {
+		try {
+			countRoom = 0;
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
+			if (response != null && response.has(NeatPulseConstant.ROOMS) && response.get(NeatPulseConstant.ROOMS).isArray()) {
+				countRoom = response.get(NeatPulseConstant.ROOMS).size();
+			}
+		} catch (Exception ex) {
+			throw new ResourceNotReachableException(String.format("Error when retrieve room information. %s", ex.getMessage()), ex);
+		}
+	}
+
+	/**
+	 * Populates system information into the provided stats map.
+	 * This method adds the number of devices and the number of console rooms to the stats map.
+	 *
+	 * @param stats The map to populate with system information.
+	 */
+	private void populateSystemInfo(Map<String, String> stats) {
+		stats.put("NumberOfDevices", String.valueOf(deviceList.size()));
+		stats.put("NumberOfConsoleRooms", String.valueOf(countRoom));
+	}
+
+	/**
+	 * Populates device details using multiple threads.
+	 * Retrieves aggregated data for each device in the device list concurrently.
+	 */
+	private void populateDeviceDetails() {
+		int numberOfThreads = getDefaultNumberOfThread();
+		ExecutorService executorServiceForRetrieveAggregatedData = Executors.newFixedThreadPool(numberOfThreads);
+		List<Future<?>> futures = new ArrayList<>();
+
+		if (endIndex > deviceList.size()) {
+			endIndex = deviceList.size();
+		}
+		synchronized (deviceList) {
+			for (int i = startIndex; i < endIndex; i++) {
+				int index = i;
+				Future<?> future = executorServiceForRetrieveAggregatedData.submit(() -> processDeviceId(deviceList.get(index)));
+				futures.add(future);
+			}
+		}
+		waitForFutures(futures, executorServiceForRetrieveAggregatedData);
+		executorServiceForRetrieveAggregatedData.shutdown();
+		if (endIndex == deviceList.size()) {
+			startIndex = NeatPulseConstant.START_INDEX;
+			endIndex = NeatPulseConstant.NUMBER_DEVICE_IN_INTERVAL;
+		} else {
+			startIndex = endIndex;
+			endIndex += NeatPulseConstant.NUMBER_DEVICE_IN_INTERVAL;
+		}
+	}
+
+	/**
+	 * Waits for the completion of all futures in the provided list and then shuts down the executor service.
+	 *
+	 * @param futures The list of Future objects representing asynchronous tasks.
+	 * @param executorService The ExecutorService to be shut down.
+	 */
+	private void waitForFutures(List<Future<?>> futures, ExecutorService executorService) {
+		for (Future<?> future : futures) {
+			try {
+				future.get();
+			} catch (Exception e) {
+				logger.error("An exception occurred while waiting for a future to complete.", e);
+			}
+		}
+		executorService.shutdown();
+	}
+
+	/**
+	 * Processes the specified device by retrieving its information, sensor data, and settings.
+	 *
+	 * @param deviceId The ID of the device to be processed.
+	 */
+	private void processDeviceId(String deviceId) {
+		retrieveDeviceInfo(deviceId);
+	}
+
+	/**
+	 * Retrieves device information for the specified device ID.
+	 *
+	 * @param deviceId The ID of the device.
+	 */
+	private void retrieveDeviceInfo(String deviceId) {
+		try {
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+			if (response != null) {
+				Map<String, String> mappingValue = new HashMap<>();
+				for (DeviceInfo item : DeviceInfo.values()) {
+					if (!NeatPulseConstant.EMPTY.equals(item.getValue())) {
+						String value = NeatPulseConstant.EMPTY;
+						JsonNode itemValueNode = response.get(item.getValue());
+						if (itemValueNode != null) {
+							if (itemValueNode.isArray()) {
+								value = itemValueNode.toString();
+							} else {
+								value = itemValueNode.asText();
+							}
+						}
+						mappingValue.put(item.getPropertyName(), value);
+					}
+				}
+				putMapIntoCachedData(deviceId, mappingValue);
+			}
+		} catch (Exception e) {
+			logger.error(String.format("Error when retrieve device info by id %s", deviceId), e);
+		}
+	}
+
+	/**
+	 * Gets the default number of threads based on the provided input or a default constant value.
+	 *
+	 * @return The default number of threads.
+	 */
+	private int getDefaultNumberOfThread() {
+		int result;
+		try {
+			if (numberThreads == null || numberThreads <= 0 || numberThreads >= NeatPulseConstant.DEFAULT_NUMBER_THREAD) {
+				result = NeatPulseConstant.DEFAULT_NUMBER_THREAD;
+			} else {
+				result = numberThreads;
+			}
+		} catch (Exception e) {
+			result = NeatPulseConstant.DEFAULT_NUMBER_THREAD;
+		}
+		return result;
+	}
+
+	/**
+	 * Puts the provided mapping values into the cached monitoring data for the specified device ID.
+	 *
+	 * @param deviceId The ID of the device.
+	 * @param mappingValue The mapping values to be added.
+	 */
+	private void putMapIntoCachedData(String deviceId, Map<String, String> mappingValue) {
+		synchronized (cachedMonitoringDevice) {
+			Map<String, String> map = new HashMap<>();
+			if (cachedMonitoringDevice.get(deviceId) != null) {
+				map = cachedMonitoringDevice.get(deviceId);
+			}
+			map.putAll(mappingValue);
+			cachedMonitoringDevice.put(deviceId, map);
+		}
 	}
 }
