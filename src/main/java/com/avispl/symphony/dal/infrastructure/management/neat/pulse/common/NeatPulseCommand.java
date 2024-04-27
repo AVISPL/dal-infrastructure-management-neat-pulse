@@ -17,4 +17,5 @@ public class NeatPulseCommand {
 	public static final String GET_DEVICE_INFO_COMMAND = "api/v1/orgs/%s/endpoints/%s";
 	public static final String GET_DEVICE_SENSOR_COMMAND = "api/v1/orgs/%s/endpoints/%s/sensor";
 	public static final String GET_DEVICE_SETTINGS_COMMAND = "api/v1/orgs/%s/endpoints/%s/config";
+	public static final String CONTROL_DEVICE = "api/v1/orgs/%s/endpoints/%s/config";
 }

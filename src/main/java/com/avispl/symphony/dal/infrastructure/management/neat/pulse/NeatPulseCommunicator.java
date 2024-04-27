@@ -9,12 +9,15 @@ import java.net.ConnectException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -31,18 +34,29 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import javax.security.auth.login.FailedLoginException;
 
 import com.avispl.symphony.api.dal.control.Controller;
+import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.Statistics;
 import com.avispl.symphony.api.dal.dto.monitor.aggregator.AggregatedDevice;
+import com.avispl.symphony.api.dal.error.CommandFailureException;
 import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
 import com.avispl.symphony.api.dal.monitor.Monitorable;
 import com.avispl.symphony.api.dal.monitor.aggregator.Aggregator;
 import com.avispl.symphony.dal.communicator.RestCommunicator;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.EnumTypeHandler;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseCommand;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseConstant;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.PingMode;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceInfo;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSensor;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSettings;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.ColorCorrectionEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.DateFormatEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.FontSizeEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.LanguageEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.ScreenStandbyEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.TimeZoneEnum;
 import com.avispl.symphony.dal.util.StringUtils;
 
 
@@ -143,12 +157,27 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private volatile long validRetrieveStatisticsTimestamp;
 
 	/**
+	 * Aggregator inactivity timeout. If the {@link NeatPulseCommunicator#retrieveMultipleStatistics()}  method is not
+	 * called during this period of time - device is considered to be paused, thus the Cloud API
+	 * is not supposed to be called
+	 */
+	private static final long retrieveStatisticsTimeOut = 3 * 60 * 1000;
+
+	/**
 	 * Update the status of the device.
 	 * The device is considered as paused if did not receive any retrieveMultipleStatistics()
 	 * calls during {@link NeatPulseCommunicator}
 	 */
 	private synchronized void updateAggregatorStatus() {
 		devicePaused = validRetrieveStatisticsTimestamp < System.currentTimeMillis();
+	}
+
+	/**
+	 * Uptime time stamp to valid one
+	 */
+	private synchronized void updateValidRetrieveStatisticsTimestamp() {
+		validRetrieveStatisticsTimestamp = System.currentTimeMillis() + retrieveStatisticsTimeOut;
+		updateAggregatorStatus();
 	}
 
 	/**
@@ -370,7 +399,19 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	@Override
 	public List<AggregatedDevice> retrieveMultipleStatistics() throws Exception {
-		return null;
+		if (StringUtils.isNullOrEmpty(this.getLogin())) {
+			throw new ResourceNotReachableException("Please check Organization Id in Username field");
+		}
+		if (executorService == null) {
+			executorService = Executors.newFixedThreadPool(1);
+			executorService.submit(deviceDataLoader = new NurevaConsoleDataLoader());
+		}
+		nextDevicesCollectionIterationTimestamp = System.currentTimeMillis();
+		updateValidRetrieveStatisticsTimestamp();
+		if (cachedMonitoringDevice.isEmpty()) {
+			return Collections.emptyList();
+		}
+		return cloneAndPopulateAggregatedDeviceList();
 	}
 
 	/**
@@ -488,7 +529,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void populateSystemInfo(Map<String, String> stats) {
 		stats.put("NumberOfDevices", String.valueOf(deviceList.size()));
-		stats.put("NumberOfConsoleRooms", String.valueOf(countRoom));
+		stats.put("NumberOfPulseRooms", String.valueOf(countRoom));
 	}
 
 	/**
@@ -545,6 +586,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void processDeviceId(String deviceId) {
 		retrieveDeviceInfo(deviceId);
+		retrieveDeviceSensor(deviceId);
+		retrieveDeviceSettings(deviceId);
 	}
 
 	/**
@@ -575,6 +618,410 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			}
 		} catch (Exception e) {
 			logger.error(String.format("Error when retrieve device info by id %s", deviceId), e);
+		}
+	}
+
+	/**
+	 * Retrieves settings information for a device associated with a specific organization and device ID.
+	 *
+	 * @param deviceId The ID of the device to retrieve settings for.
+	 */
+	private void retrieveDeviceSettings(String deviceId) {
+		try {
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+			if (response != null) {
+				Map<String, String> mappingValue = new HashMap<>();
+				for (DeviceSettings item : DeviceSettings.values()) {
+					String value = NeatPulseConstant.EMPTY;
+					if (response.has(item.getValue())) {
+						value = response.get(item.getValue()).asText();
+					}
+					mappingValue.put(item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName(), value);
+				}
+				putMapIntoCachedData(deviceId, mappingValue);
+			}
+		} catch (Exception e) {
+			logger.error(String.format("Error when retrieve device info by id %s", deviceId), e);
+		}
+	}
+
+	/**
+	 * Retrieves sensor data for the specified device ID.
+	 *
+	 * @param deviceId The ID of the device.
+	 */
+	private void retrieveDeviceSensor(String deviceId) {
+		try {
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SENSOR_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+			if (response != null && response.has(NeatPulseConstant.ENDPOINT_DATA) && response.get(NeatPulseConstant.ENDPOINT_DATA).has(NeatPulseConstant.DATA)) {
+				Map<String, String> mappingValue = new HashMap<>();
+				mappingValue.put(NeatPulseConstant.DEVICE_SENSOR, response.get(NeatPulseConstant.ENDPOINT_DATA).get(NeatPulseConstant.DATA).toString());
+				putMapIntoCachedData(deviceId, mappingValue);
+			}
+		} catch (CommandFailureException ex) {
+			logger.warn(String.format("Device %s not support the sensor command", deviceId));
+		} catch (Exception e) {
+			logger.error(String.format("Error when retrieve device sensor by id %s", deviceId), e);
+		}
+	}
+
+	/**
+	 * Clones the cached monitoring device list and populates the aggregated device list.
+	 *
+	 * @return The populated aggregated device list.
+	 */
+	private List<AggregatedDevice> cloneAndPopulateAggregatedDeviceList() {
+		synchronized (aggregatedDeviceList) {
+			cachedMonitoringDevice.forEach((key, value) -> {
+				AggregatedDevice aggregatedDevice = new AggregatedDevice();
+				Map<String, String> cachedData = cachedMonitoringDevice.get(key);
+				String deviceName = cachedData.get(DeviceInfo.SERIAL.getPropertyName());
+				String deviceStatus = cachedData.get(DeviceInfo.CONNECTED.getPropertyName());
+				String deviceModel = cachedData.get(DeviceInfo.MODEL.getPropertyName());
+				aggregatedDevice.setDeviceId(key);
+				aggregatedDevice.setDeviceOnline(false);
+				if (deviceStatus != null) {
+					aggregatedDevice.setDeviceOnline(NeatPulseConstant.TRUE.equalsIgnoreCase(deviceStatus));
+				}
+				if (deviceName != null) {
+					aggregatedDevice.setDeviceName(deviceName);
+				}
+				if (deviceModel != null) {
+					aggregatedDevice.setDeviceModel(deviceModel);
+				}
+				Map<String, String> stats = new HashMap<>();
+				List<AdvancedControllableProperty> advancedControllableProperties = new ArrayList<>();
+				populateMonitorProperties(cachedData, stats, advancedControllableProperties);
+				aggregatedDevice.setProperties(stats);
+				aggregatedDevice.setControllableProperties(advancedControllableProperties);
+				addOrUpdateAggregatedDevice(aggregatedDevice);
+			});
+		}
+		return aggregatedDeviceList;
+	}
+
+	/**
+	 * Adds or updates the aggregated device in the aggregated device list.
+	 *
+	 * @param aggregatedDevice The aggregated device to be added or updated.
+	 */
+	private void addOrUpdateAggregatedDevice(AggregatedDevice aggregatedDevice) {
+		boolean isExist = aggregatedDeviceList.stream().anyMatch(dev -> dev.getDeviceId().equals(aggregatedDevice.getDeviceId()));
+		if (isExist) {
+			aggregatedDeviceList.removeIf(dev -> dev.getDeviceId().equals(aggregatedDevice.getDeviceId()));
+		}
+		aggregatedDeviceList.add(aggregatedDevice);
+	}
+
+	/**
+	 * Populates monitor properties including device info, device sensor, device settings, and advanced controllable properties.
+	 *
+	 * @param cached The cached data containing device information.
+	 * @param stats The map to store monitor properties.
+	 * @param advancedControllableProperties The list to store advanced controllable properties.
+	 */
+	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, List<AdvancedControllableProperty> advancedControllableProperties) {
+		populateDeviceInfo(cached, stats);
+		populateDeviceSensor(cached, stats);
+		populateDeviceSettings(cached, stats, advancedControllableProperties);
+	}
+
+	/**
+	 * Populates device information into the stats map.
+	 *
+	 * @param cached The cached data containing device information.
+	 * @param stats The map to store device information.
+	 */
+	private void populateDeviceInfo(Map<String, String> cached, Map<String, String> stats) {
+		for (DeviceInfo item : DeviceInfo.values()) {
+			String propertyName = item.getPropertyName();
+			String value = getDefaultValueForNullData(cached.get(propertyName));
+			switch (item) {
+				case CONNECTED:
+				case MODEL:
+					break;
+				case CONNECTION_TIME:
+					stats.put(propertyName, convertDateTimeFormat(value));
+					break;
+				case FIRMWARE_UPDATE_VERSION:
+					String currentVersion = getDefaultValueForNullData(cached.get(DeviceInfo.FIRMWARE_CURRENT_VERSION.getPropertyName()));
+					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+						stats.put(propertyName, value);
+					} else {
+						String updateAvailable = "false";
+						if (!value.equalsIgnoreCase(currentVersion)) {
+							stats.put(propertyName, value);
+							updateAvailable = "true";
+						}
+						stats.put("FirmwareUpdateAvailable ", updateAvailable);
+					}
+					break;
+				default:
+					stats.put(propertyName, value);
+					break;
+			}
+		}
+	}
+
+	/**
+	 * Populates device sensor information into the specified {@code stats} map based on the cached data.
+	 * This method parses the JSON data from the cached device sensor information and extracts relevant sensor properties.
+	 *
+	 * @param cached The cached data containing device sensor information.
+	 * @param stats The map to populate with the extracted sensor information.
+	 */
+	private void populateDeviceSensor(Map<String, String> cached, Map<String, String> stats) {
+		try {
+			String jsonValue = getDefaultValueForNullData(cached.get(NeatPulseConstant.DEVICE_SENSOR));
+			if (NeatPulseConstant.NONE.equals(jsonValue)) {
+				return;
+			}
+			JsonNode sensorJson = objectMapper.readTree(jsonValue);
+			if (sensorJson.isArray()) {
+				int index = 0;
+				for (JsonNode node : sensorJson) {
+					index++;
+					String group = NeatPulseConstant.SENSOR_INFORMATION + index + NeatPulseConstant.HASH;
+					if (sensorJson.size() == 1) {
+						group = NeatPulseConstant.SENSOR_INFORMATION + NeatPulseConstant.HASH;
+					}
+					for (DeviceSensor item : DeviceSensor.values()) {
+						if (node.has(item.getValue())) {
+							String name = group + item.getPropertyName();
+							String value = getDefaultValueForNullData(node.get(item.getValue()).asText());
+							switch (item) {
+								case TEMPERATURE:
+								case HUMIDITY:
+								case ILLUMINATION:
+									stats.put(name, roundDoubleValue(value));
+									break;
+								case TIMESTAMP:
+									stats.put(name, convertTimestampToFormattedDate(value));
+									break;
+								default:
+									stats.put(name, value);
+									break;
+							}
+						}
+					}
+				}
+			}
+		} catch (Exception e) {
+			logger.error("Error while populate Sensor Info", e);
+		}
+	}
+
+	/**
+	 * Populates device settings information into the specified {@code stats} map based on the cached data.
+	 * This method retrieves device settings from the cached data and updates the {@code stats} map with the corresponding settings properties.
+	 *
+	 * @param cached The cached data containing device settings information.
+	 * @param stats The map to populate with the extracted device settings information.
+	 */
+	private void populateDeviceSettings(Map<String, String> cached, Map<String, String> stats, List<AdvancedControllableProperty> advancedControllableProperties) {
+		for (DeviceSettings item : DeviceSettings.values()) {
+			String propertyName = item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName();
+			String value = getDefaultValueForNullData(cached.get(propertyName));
+			switch (item) {
+				case REBOOT:
+					addAdvancedControlProperties(advancedControllableProperties, stats, createButton("Reboot", "Apply", "Applying", 0), NeatPulseConstant.NONE);
+					break;
+				case SCREEN_BRIGHTNESS:
+					if (NeatPulseConstant.NONE.equals(value)) {
+						stats.put(propertyName, value);
+					} else {
+						float percentValue = Float.parseFloat(value) * 100;
+						addAdvancedControlProperties(advancedControllableProperties, stats, createSlider(stats, propertyName, "0", "100", 0f, 100f, percentValue), String.valueOf((int) percentValue));
+						stats.put("Display#ScreenBrightnessCurrentValue(%)", String.valueOf((int) percentValue));
+					}
+					break;
+				case SCREEN_STANDBY:
+					String enumName = EnumTypeHandler.getNameByValue(ScreenStandbyEnum.class, value);
+					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
+						addAdvancedControlProperties(advancedControllableProperties, stats,
+								createDropdown(propertyName, EnumTypeHandler.getEnumNames(ScreenStandbyEnum.class), enumName), enumName);
+					} else {
+						stats.put(propertyName, NeatPulseConstant.NONE);
+					}
+					break;
+				case DATE_FORMAT:
+					enumName = EnumTypeHandler.getNameByValue(DateFormatEnum.class, value);
+					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
+						addAdvancedControlProperties(advancedControllableProperties, stats,
+								createDropdown(propertyName, EnumTypeHandler.getEnumNames(DateFormatEnum.class), enumName), enumName);
+					} else {
+						stats.put(propertyName, NeatPulseConstant.NONE);
+					}
+					break;
+				case LANGUAGE:
+					enumName = EnumTypeHandler.getNameByValue(LanguageEnum.class, value);
+					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
+						addAdvancedControlProperties(advancedControllableProperties, stats,
+								createDropdown(propertyName, EnumTypeHandler.getEnumNames(LanguageEnum.class), enumName), enumName);
+					} else {
+						stats.put(propertyName, NeatPulseConstant.NONE);
+					}
+					break;
+				case TIME_ZONE:
+					String[] possibleValues = EnumTypeHandler.getEnumNames(TimeZoneEnum.class);
+					value = value.replace("_", " ");
+					if (Arrays.asList(possibleValues).contains(value)) {
+						addAdvancedControlProperties(advancedControllableProperties, stats, createDropdown(propertyName, possibleValues, value), value);
+					} else {
+						stats.put(propertyName, NeatPulseConstant.NONE);
+					}
+					break;
+				case FONT_SIZE:
+					possibleValues = EnumTypeHandler.getEnumNames(FontSizeEnum.class);
+					value = uppercaseFirstCharacter(value);
+					if (Arrays.asList(possibleValues).contains(value)) {
+						addAdvancedControlProperties(advancedControllableProperties, stats, createDropdown(propertyName, possibleValues, value), value);
+					} else {
+						stats.put(propertyName, NeatPulseConstant.NONE);
+					}
+					break;
+				case COLOR_CORRECTION:
+					enumName = EnumTypeHandler.getNameByValue(ColorCorrectionEnum.class, value);
+					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
+						addAdvancedControlProperties(advancedControllableProperties, stats,
+								createDropdown(propertyName, EnumTypeHandler.getEnumNames(ColorCorrectionEnum.class), enumName), enumName);
+					} else {
+						stats.put(propertyName, NeatPulseConstant.NONE);
+					}
+					break;
+				case AUTO_WAKEUP:
+				case KEEP_SCREEN_ON:
+				case HDMI_CEC_CONTROL:
+				case BLUETOOTH:
+				case BYOD_MODE:
+				case HOUR_TIME:
+				case VOICE_ISOLATION:
+				case HIGH_CONTRAST_MODE:
+				case SCREEN_READER:
+				case USB_AUDIO:
+					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+						stats.put(propertyName, value);
+					} else {
+						int status = NeatPulseConstant.TRUE.equalsIgnoreCase(value) ? 1 : 0;
+						addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, NeatPulseConstant.OFF, NeatPulseConstant.ON), String.valueOf(status));
+					}
+					break;
+				case NIGHT_MODE:
+					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+						stats.put(propertyName, value);
+					} else {
+						int status = NeatPulseConstant.TRUE.equalsIgnoreCase(value) ? 1 : 0;
+						addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, "Light Mode", "Dark Mode"), String.valueOf(status));
+					}
+					break;
+				case DISPLAY_PREFERENCE:
+					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+						stats.put(propertyName, value);
+					} else {
+						int status = NeatPulseConstant.TRUE.equalsIgnoreCase(value) ? 1 : 0;
+						addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, "Higher Resolution", "Lower Latency"), String.valueOf(status));
+					}
+					break;
+				case NTP_SERVER:
+					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+						value = NeatPulseConstant.EMPTY;
+					}
+					addAdvancedControlProperties(advancedControllableProperties, stats, createText(propertyName, value), value);
+					break;
+				default:
+					stats.put(propertyName, uppercaseFirstCharacter(value));
+					break;
+			}
+		}
+	}
+
+	/**
+	 * check value is null or empty
+	 *
+	 * @param value input value
+	 * @return value after checking
+	 */
+	private String getDefaultValueForNullData(String value) {
+		return StringUtils.isNotNullOrEmpty(value) ? value : NeatPulseConstant.NONE;
+	}
+
+	/**
+	 * capitalize the first character of the string
+	 *
+	 * @param input input string
+	 * @return string after fix
+	 */
+	private String uppercaseFirstCharacter(String input) {
+		char firstChar = input.charAt(0);
+		return Character.toUpperCase(firstChar) + input.substring(1);
+	}
+
+	/**
+	 * Rounds a double value to the nearest long integer.
+	 *
+	 * @param value the string representation of the double value to be rounded
+	 * @return the rounded long value as a string, or the original value if it is "NONE" or cannot be parsed as a double
+	 */
+	private String roundDoubleValue(String value) {
+		if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+			return value;
+		} else {
+			try {
+				double doubleNumber = Double.parseDouble(value);
+				return String.valueOf(Math.round(doubleNumber));
+			} catch (NumberFormatException e) {
+				return NeatPulseConstant.NONE;
+			}
+		}
+	}
+
+	/**
+	 * Converts the given timestamp value to a formatted date string.
+	 * If the input value is {@link NeatPulseConstant#NONE}, it returns the same value.
+	 *
+	 * @param input The timestamp value to convert.
+	 * @return The formatted date string.
+	 */
+	private String convertTimestampToFormattedDate(String input) {
+		if (NeatPulseConstant.NONE.equals(input)) {
+			return input;
+		}
+		try {
+			long timestamp = Long.parseLong(input);
+			Date date = new Date(timestamp * 1000);
+			SimpleDateFormat formatter = new SimpleDateFormat(NeatPulseConstant.TARGET_FORMAT_DATETIME);
+			formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+			return formatter.format(date);
+		} catch (Exception e) {
+			logger.error("Error when convert Timestamp To Formatted Date");
+			return NeatPulseConstant.NONE;
+		}
+	}
+
+	/**
+	 * Converts a date-time string from the default format to the target format with GMT timezone.
+	 *
+	 * @param inputDateTime The input date-time string in the default format.
+	 * @return The date-time string after conversion to the target format with GMT timezone.
+	 * Returns {@link NeatPulseConstant#NONE} if there is an error during conversion.
+	 * @throws Exception If there is an error parsing the input date-time string.
+	 */
+	private String convertDateTimeFormat(String inputDateTime) {
+		if (NeatPulseConstant.NONE.equals(inputDateTime)) {
+			return inputDateTime;
+		}
+		try {
+			SimpleDateFormat inputFormat = new SimpleDateFormat(NeatPulseConstant.DEFAULT_FORMAT_DATETIME);
+			inputFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
+
+			SimpleDateFormat outputFormat = new SimpleDateFormat(NeatPulseConstant.TARGET_FORMAT_DATETIME);
+			outputFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
+
+			Date date = inputFormat.parse(inputDateTime);
+			return outputFormat.format(date);
+		} catch (Exception e) {
+			logger.warn("Can't convert the date time value");
+			return NeatPulseConstant.NONE;
 		}
 	}
 
@@ -611,6 +1058,109 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			}
 			map.putAll(mappingValue);
 			cachedMonitoringDevice.put(deviceId, map);
+		}
+	}
+
+	/**
+	 * Create a button.
+	 *
+	 * @param name name of the button
+	 * @param label label of the button
+	 * @param labelPressed label of the button after pressing it
+	 * @param gracePeriod grace period of button
+	 * @return This returns the instance of {@link AdvancedControllableProperty} type Button.
+	 */
+	private AdvancedControllableProperty createButton(String name, String label, String labelPressed, long gracePeriod) {
+		AdvancedControllableProperty.Button button = new AdvancedControllableProperty.Button();
+		button.setLabel(label);
+		button.setLabelPressed(labelPressed);
+		button.setGracePeriod(gracePeriod);
+		return new AdvancedControllableProperty(name, new Date(), button, NeatPulseConstant.EMPTY);
+	}
+
+	/**
+	 * Create switch is control property for metric
+	 *
+	 * @param name the name of property
+	 * @param status initial status (0|1)
+	 * @return AdvancedControllableProperty switch instance
+	 */
+	private AdvancedControllableProperty createSwitch(String name, int status, String labelOff, String labelOn) {
+		AdvancedControllableProperty.Switch toggle = new AdvancedControllableProperty.Switch();
+		toggle.setLabelOff(labelOff);
+		toggle.setLabelOn(labelOn);
+
+		AdvancedControllableProperty advancedControllableProperty = new AdvancedControllableProperty();
+		advancedControllableProperty.setName(name);
+		advancedControllableProperty.setValue(status);
+		advancedControllableProperty.setType(toggle);
+		advancedControllableProperty.setTimestamp(new Date());
+
+		return advancedControllableProperty;
+	}
+
+	/***
+	 * Create dropdown advanced controllable property
+	 *
+	 * @param name the name of the control
+	 * @param initialValue initial value of the control
+	 * @return AdvancedControllableProperty dropdown instance
+	 */
+	private AdvancedControllableProperty createDropdown(String name, String[] values, String initialValue) {
+		AdvancedControllableProperty.DropDown dropDown = new AdvancedControllableProperty.DropDown();
+		dropDown.setOptions(values);
+		dropDown.setLabels(values);
+
+		return new AdvancedControllableProperty(name, new Date(), dropDown, initialValue);
+	}
+
+	/***
+	 * Create AdvancedControllableProperty slider instance
+	 *
+	 * @param stats extended statistics
+	 * @param name name of the control
+	 * @param initialValue initial value of the control
+	 * @return AdvancedControllableProperty slider instance
+	 */
+	private AdvancedControllableProperty createSlider(Map<String, String> stats, String name, String labelStart, String labelEnd, Float rangeStart, Float rangeEnd, Float initialValue) {
+		stats.put(name, initialValue.toString());
+		AdvancedControllableProperty.Slider slider = new AdvancedControllableProperty.Slider();
+		slider.setLabelStart(labelStart);
+		slider.setLabelEnd(labelEnd);
+		slider.setRangeStart(rangeStart);
+		slider.setRangeEnd(rangeEnd);
+
+		return new AdvancedControllableProperty(name, new Date(), slider, initialValue);
+	}
+
+	/**
+	 * Create text is control property for metric
+	 *
+	 * @param name the name of the property
+	 * @param stringValue character string
+	 * @return AdvancedControllableProperty Text instance
+	 */
+	private AdvancedControllableProperty createText(String name, String stringValue) {
+		AdvancedControllableProperty.Text text = new AdvancedControllableProperty.Text();
+		return new AdvancedControllableProperty(name, new Date(), text, stringValue);
+	}
+
+	/**
+	 * Add addAdvancedControlProperties if advancedControllableProperties different empty
+	 *
+	 * @param advancedControllableProperties advancedControllableProperties is the list that store all controllable properties
+	 * @param stats store all statistics
+	 * @param property the property is item advancedControllableProperties
+	 * @throws IllegalStateException when exception occur
+	 */
+	private void addAdvancedControlProperties(List<AdvancedControllableProperty> advancedControllableProperties, Map<String, String> stats, AdvancedControllableProperty property, String value) {
+		if (property != null) {
+			advancedControllableProperties.removeIf(controllableProperty -> controllableProperty.getName().equals(property.getName()));
+
+			String propertyValue = StringUtils.isNotNullOrEmpty(value) ? value : NeatPulseConstant.EMPTY;
+			stats.put(property.getName(), propertyValue);
+
+			advancedControllableProperties.add(property);
 		}
 	}
 }

@@ -4,6 +4,7 @@
 
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Assert;
@@ -11,7 +12,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
+import com.avispl.symphony.api.dal.dto.monitor.aggregator.AggregatedDevice;
 
 /**
  * NeatPulseCommunicatorTest
@@ -49,5 +52,17 @@ public class NeatPulseCommunicatorTest {
 		extendedStatistic = (ExtendedStatistics) neatPulseCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> statistics = extendedStatistic.getStatistics();
 		Assert.assertEquals(2, statistics.size());
+	}
+
+	/**
+	 * Test case to verify the warnings of room.
+	 */
+	@Test
+	void testGetMultipleStatistics() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(30000);
+		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
+		Assert.assertEquals(47, aggregatedDeviceList.size());
 	}
 }
