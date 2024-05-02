@@ -1,5 +1,16 @@
+/*
+ *  Copyright (c) 2024 AVI-SPL, Inc. All Rights Reserved.
+ */
+
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric;
 
+/**
+ * ColorCorrectionEnum
+ *
+ * @author Harry / Symphony Dev Team<br>
+ * Created on 5/2/2024
+ * @since 1.0.0
+ */
 public enum ColorCorrectionEnum {
 	DISABLED("Disabled", "disabled"),
 	DEUTERA("Deuteranomaly (red-green)", "deuteranomaly"),

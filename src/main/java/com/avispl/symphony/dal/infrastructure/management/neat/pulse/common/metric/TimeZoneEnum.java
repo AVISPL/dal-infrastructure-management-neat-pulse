@@ -1,5 +1,17 @@
+/*
+ *  Copyright (c) 2024 AVI-SPL, Inc. All Rights Reserved.
+ */
+
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric;
 
+
+/**
+ * TimeZoneEnum
+ *
+ * @author Harry / Symphony Dev Team<br>
+ * Created on 4/24/2024
+ * @since 1.0.0
+ */
 public enum TimeZoneEnum {
 	MIDWAY("Pacific/Midway"),
 	HONOLULU("Pacific/Honolulu"),

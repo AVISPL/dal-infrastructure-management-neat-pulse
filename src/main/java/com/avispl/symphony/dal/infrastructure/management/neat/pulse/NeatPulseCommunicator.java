@@ -17,6 +17,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -51,10 +52,13 @@ import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.PingM
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceInfo;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSensor;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSettings;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.CallStatusEnum;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.ColorCorrectionEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.ControllerModeEnum;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.DateFormatEnum;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.FontSizeEnum;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.LanguageEnum;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.PrimaryModeEnum;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.ScreenStandbyEnum;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.TimeZoneEnum;
 import com.avispl.symphony.dal.util.StringUtils;
@@ -62,16 +66,16 @@ import com.avispl.symphony.dal.util.StringUtils;
 
 public class NeatPulseCommunicator extends RestCommunicator implements Aggregator, Monitorable, Controller {
 	/**
-	 * Process that is running constantly and triggers collecting data from Nureva Console SE API endpoints, based on the given timeouts and thresholds.
+	 * Process that is running constantly and triggers collecting data from NeatPulse SE API endpoints, based on the given timeouts and thresholds.
 	 *
 	 * @author Harry
 	 * @since 1.0.0
 	 */
-	class NurevaConsoleDataLoader implements Runnable {
+	class NeatPulseDataLoader implements Runnable {
 		private volatile boolean inProgress;
 		private volatile boolean flag = false;
 
-		public NurevaConsoleDataLoader() {
+		public NeatPulseDataLoader() {
 			inProgress = true;
 		}
 
@@ -82,14 +86,14 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				try {
 					TimeUnit.MILLISECONDS.sleep(500);
 				} catch (InterruptedException e) {
-					// Ignore for now
+					logger.info("Ignore for now");
 				}
 
 				if (!inProgress) {
 					break loop;
 				}
 
-				// next line will determine whether Nureva Console monitoring was paused
+				// next line will determine whether Neat Pulse monitoring was paused
 				updateAggregatorStatus();
 				if (devicePaused) {
 					continue loop;
@@ -107,7 +111,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					try {
 						TimeUnit.MILLISECONDS.sleep(1000);
 					} catch (InterruptedException e) {
-						//
+						logger.info("Ignore for now");
 					}
 				}
 
@@ -193,9 +197,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private ExecutorService executorService;
 
 	/**
-	 * A private field that represents an instance of the NurevaConsoleLoader class, which is responsible for loading device data for Nureva Console
+	 * A private field that represents an instance of the NeatPulseLoader class, which is responsible for loading device data for Neat Pulse
 	 */
-	private NurevaConsoleDataLoader deviceDataLoader;
+	private NeatPulseDataLoader deviceDataLoader;
 
 	/**
 	 * A private final ReentrantLock instance used to provide exclusive access to a shared resource
@@ -286,7 +290,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * Constructs a new instance of NurevaConsoleCommunicator.
+	 * Constructs a new instance of NeatPulseCommunicator.
 	 *
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
@@ -374,7 +378,90 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	@Override
 	public void controlProperty(ControllableProperty controllableProperty) throws Exception {
+		reentrantLock.lock();
+		try {
+			String property = controllableProperty.getProperty();
+			String deviceId = controllableProperty.getDeviceId();
+			String value = String.valueOf(controllableProperty.getValue());
 
+			String[] propertyList = property.split(NeatPulseConstant.HASH);
+			String propertyName = property;
+			if (property.contains(NeatPulseConstant.HASH)) {
+				propertyName = propertyList[1];
+			}
+			Optional<AggregatedDevice> aggregatedDevice = aggregatedDeviceList.stream().filter(item -> item.getDeviceId().equals(deviceId)).findFirst();
+			if (aggregatedDevice.isPresent()) {
+				DeviceSettings item = DeviceSettings.getByDefaultName(propertyName);
+				switch (item) {
+					case AUTO_WAKEUP:
+					case KEEP_SCREEN_ON:
+					case HDMI_CEC_CONTROL:
+					case BLUETOOTH:
+					case BYOD_MODE:
+					case HOUR_TIME:
+					case HIGH_CONTRAST_MODE:
+					case SCREEN_READER:
+					case USB_AUDIO:
+					case NIGHT_MODE:
+					case DISPLAY_PREFERENCE:
+						boolean status = "1".equalsIgnoreCase(value);
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), status);
+						updateCacheValue(deviceId, property, String.valueOf(status));
+						break;
+					case NTP_SERVER:
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), value);
+						updateCacheValue(deviceId, property, value);
+						break;
+					case SCREEN_BRIGHTNESS:
+						float percentValue = Float.parseFloat(value) / 100;
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), percentValue);
+						updateCacheValue(deviceId, property, String.valueOf(percentValue));
+						break;
+					case SCREEN_STANDBY:
+						String bodyValue = EnumTypeHandler.getValueByName(ScreenStandbyEnum.class, value);
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), Long.parseLong(bodyValue));
+						updateCacheValue(deviceId, property, bodyValue);
+						break;
+					case DATE_FORMAT:
+						bodyValue = EnumTypeHandler.getValueByName(DateFormatEnum.class, value);
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), bodyValue);
+						updateCacheValue(deviceId, property, bodyValue);
+						break;
+					case LANGUAGE:
+						bodyValue = EnumTypeHandler.getValueByName(LanguageEnum.class, value);
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), bodyValue);
+						updateCacheValue(deviceId, property, bodyValue);
+						break;
+					case COLOR_CORRECTION:
+						bodyValue = EnumTypeHandler.getValueByName(ColorCorrectionEnum.class, value);
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), bodyValue);
+						updateCacheValue(deviceId, property, bodyValue);
+						break;
+					case TIME_ZONE:
+						bodyValue = value.replace(" ", "_");
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), bodyValue);
+						updateCacheValue(deviceId, property, bodyValue);
+						break;
+					case FONT_SIZE:
+						bodyValue = value.toLowerCase();
+						sendCommandToControlDevice(deviceId, propertyName, item.getValue(), bodyValue);
+						updateCacheValue(deviceId, property, bodyValue);
+						break;
+					case REBOOT:
+
+						break;
+					default:
+						if (logger.isWarnEnabled()) {
+							logger.warn(String.format("Unable to execute %s command on device %s: Not Supported", property, deviceId));
+						}
+						break;
+				}
+			} else {
+				throw new IllegalArgumentException(String.format("Unable to control property: %s as the device does not exist.", property));
+			}
+		} finally {
+			reentrantLock.unlock();
+		}
 	}
 
 	/**
@@ -404,7 +491,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		}
 		if (executorService == null) {
 			executorService = Executors.newFixedThreadPool(1);
-			executorService.submit(deviceDataLoader = new NurevaConsoleDataLoader());
+			executorService.submit(deviceDataLoader = new NeatPulseDataLoader());
 		}
 		nextDevicesCollectionIterationTimestamp = System.currentTimeMillis();
 		updateValidRetrieveStatisticsTimestamp();
@@ -449,7 +536,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			logger.debug("Internal init is called.");
 		}
 		executorService = Executors.newFixedThreadPool(1);
-		executorService.submit(deviceDataLoader = new NurevaConsoleDataLoader());
+		executorService.submit(deviceDataLoader = new NeatPulseDataLoader());
 		super.internalInit();
 	}
 
@@ -478,6 +565,23 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		cachedMonitoringDevice.clear();
 		deviceList.clear();
 		super.internalDestroy();
+	}
+
+	private void sendCommandToControlDevice(String deviceId, String name, String fieldName, Object value) {
+		try {
+			String command = String.format(NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId);
+			Map<String, Object> bodyJson = new HashMap<>();
+			bodyJson.put(fieldName, value);
+			JsonNode response = this.doPost(command, bodyJson, JsonNode.class);
+			if (response == null || !response.has(NeatPulseConstant.CONFIG) || !response.get(NeatPulseConstant.CONFIG).has(fieldName) || !String.valueOf(value)
+					.equalsIgnoreCase(response.get(NeatPulseConstant.CONFIG).get(fieldName).asText())) {
+				throw new IllegalArgumentException("The response is incorrect");
+			}
+		} catch (CommandFailureException e) {
+			throw new IllegalArgumentException(String.format("Failed to apply config: attempted to override profile settings: the following fields contain conflicts: [%s]", name));
+		} catch (Exception e) {
+			throw new IllegalArgumentException(String.format("Can't control %s with value is %s. %s", name, value, e.getMessage()));
+		}
 	}
 
 	/**
@@ -756,6 +860,15 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 						stats.put("FirmwareUpdateAvailable ", updateAvailable);
 					}
 					break;
+				case PRIMARY_MODE:
+					stats.put(propertyName, EnumTypeHandler.getValueByName(PrimaryModeEnum.class, value));
+					break;
+				case CONTROLLER_MODE:
+					stats.put(propertyName, EnumTypeHandler.getValueByName(ControllerModeEnum.class, value));
+					break;
+				case IN_CALL_STATUS:
+					stats.put(propertyName, EnumTypeHandler.getValueByName(CallStatusEnum.class, value));
+					break;
 				default:
 					stats.put(propertyName, value);
 					break;
@@ -895,7 +1008,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				case BLUETOOTH:
 				case BYOD_MODE:
 				case HOUR_TIME:
-				case VOICE_ISOLATION:
 				case HIGH_CONTRAST_MODE:
 				case SCREEN_READER:
 				case USB_AUDIO:
@@ -1059,6 +1171,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			map.putAll(mappingValue);
 			cachedMonitoringDevice.put(deviceId, map);
 		}
+	}
+
+	/**
+	 * Updates the cache value for a specified property in the aggregated device list.
+	 *
+	 * @param deviceId The ID of the device whose cache value needs to be updated.
+	 * @param name The name of the property to be updated.
+	 * @param value The new value to set for the property.
+	 */
+	private void updateCacheValue(String deviceId, String name, String value) {
+		cachedMonitoringDevice.computeIfAbsent(deviceId, k -> new HashMap<>()).put(name, value);
 	}
 
 	/**

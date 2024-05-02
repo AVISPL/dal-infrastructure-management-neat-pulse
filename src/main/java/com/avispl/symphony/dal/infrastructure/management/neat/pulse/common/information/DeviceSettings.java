@@ -29,7 +29,6 @@ public enum DeviceSettings {
 	NTP_SERVER("NTPServer","TimeAndLanguage", "ntpServer"),
 	TIME_ZONE("TimeZone","TimeAndLanguage", "timezone"),
 	LANGUAGE("Language","TimeAndLanguage", "language"),
-	VOICE_ISOLATION("VoiceIsolation","AudioAndVideo", "deepNoiseSuppression"),
 	USB_AUDIO("USBAudio","AudioAndVideo", "usbAudio"),
 	HIGH_CONTRAST_MODE("HighContrastMode","Accessibility", "highContrast"),
 	SCREEN_READER("ScreenReader","Accessibility", "screenReader"),
@@ -81,7 +80,7 @@ public enum DeviceSettings {
 	}
 
 	public static DeviceSettings getByDefaultName(String name) {
-		Optional<DeviceSettings> property = Arrays.stream(DeviceSettings.values()).filter(item -> item.getPropertyName().equalsIgnoreCase(name)).findFirst();
+		Optional<DeviceSettings> property = Arrays.stream(values()).filter(item -> item.getPropertyName().equalsIgnoreCase(name)).findFirst();
 		return property.orElse(null);
 	}
 }

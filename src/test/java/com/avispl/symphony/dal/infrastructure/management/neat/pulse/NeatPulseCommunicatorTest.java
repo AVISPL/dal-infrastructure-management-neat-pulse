@@ -6,12 +6,14 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.aggregator.AggregatedDevice;
@@ -64,5 +66,101 @@ public class NeatPulseCommunicatorTest {
 		Thread.sleep(30000);
 		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
 		Assert.assertEquals(47, aggregatedDeviceList.size());
+	}
+
+	@Test
+	void testDelayRequestsControl() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(20000);
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		ControllableProperty controllableProperty = new ControllableProperty();
+		String property = "Display#Appearance";
+		String value = "1";
+		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
+		controllableProperty.setProperty(property);
+		controllableProperty.setValue(value);
+		controllableProperty.setDeviceId(deviceId);
+		neatPulseCommunicator.controlProperty(controllableProperty);
+	}
+
+	@Test
+	void testBrightnessControl() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(20000);
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		ControllableProperty controllableProperty = new ControllableProperty();
+		String property = "Display#ScreenBrightness(%)";
+		String value = "85";
+		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
+		controllableProperty.setProperty(property);
+		controllableProperty.setValue(value);
+		controllableProperty.setDeviceId(deviceId);
+		neatPulseCommunicator.controlProperty(controllableProperty);
+	}
+
+	@Test
+	void testScreenStandbyControl() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(20000);
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		ControllableProperty controllableProperty = new ControllableProperty();
+		String property = "Display#ScreenStandby";
+		String value = "20 Minutes";
+		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
+		controllableProperty.setProperty(property);
+		controllableProperty.setValue(value);
+		controllableProperty.setDeviceId(deviceId);
+		neatPulseCommunicator.controlProperty(controllableProperty);
+	}
+
+	@Test
+	void testDateFormatControl() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(20000);
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		ControllableProperty controllableProperty = new ControllableProperty();
+		String property = "TimeAndLanguage#DateFormat";
+		String value = "MM-DD-YYYY";
+		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
+		controllableProperty.setProperty(property);
+		controllableProperty.setValue(value);
+		controllableProperty.setDeviceId(deviceId);
+		neatPulseCommunicator.controlProperty(controllableProperty);
+	}
+
+	@Test
+	void testTimeZoneControl() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(20000);
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		ControllableProperty controllableProperty = new ControllableProperty();
+		String property = "TimeAndLanguage#TimeZone";
+		String value = "Europe/Paris";
+		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
+		controllableProperty.setProperty(property);
+		controllableProperty.setValue(value);
+		controllableProperty.setDeviceId(deviceId);
+		neatPulseCommunicator.controlProperty(controllableProperty);
+	}
+
+	@Test
+	void testLanguageControl() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(20000);
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		ControllableProperty controllableProperty = new ControllableProperty();
+		String property = "TimeAndLanguage#Language";
+		String value = "French";
+		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
+		controllableProperty.setProperty(property);
+		controllableProperty.setValue(value);
+		controllableProperty.setDeviceId(deviceId);
+		neatPulseCommunicator.controlProperty(controllableProperty);
 	}
 }
