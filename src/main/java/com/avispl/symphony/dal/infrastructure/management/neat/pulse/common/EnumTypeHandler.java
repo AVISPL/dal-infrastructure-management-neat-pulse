@@ -14,7 +14,7 @@ import com.avispl.symphony.api.dal.error.ResourceNotReachableException;
  * EnumTypeHandler class defined the enum for monitoring and controlling process
  *
  * @author Harry / Symphony Dev Team<br>
- * Created on 6/14/2023
+ * Created on 4/24/2024
  * @since 1.0.0
  */
 public class EnumTypeHandler {

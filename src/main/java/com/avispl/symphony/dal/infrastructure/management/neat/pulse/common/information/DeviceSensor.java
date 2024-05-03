@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information;
 
 /**
- * DeviceSensor
+ * * Enum representing different types of device sensor
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/16/2024
@@ -25,10 +25,10 @@ public enum DeviceSensor {
 	private final String value;
 
 	/**
-	 * Constructor for DeviceInfo.
+	 * Constructor for DeviceSensor.
 	 *
-	 * @param defaultName The default name of the property.
-	 * @param value The code of the control.
+	 * @param defaultName The name of the device property.
+	 * @param value The corresponding value in the device response.
 	 */
 	DeviceSensor(String defaultName, String value) {
 		this.propertyName = defaultName;

@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric;
 
 /**
- * PrimaryModeEnum
+ * Enum representing different types of primary mode
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 5/2/2024
@@ -21,7 +21,12 @@ public enum PrimaryModeEnum {
 	private final String name;
 	private final String value;
 
-
+	/**
+	 * Constructor for PrimaryModeEnum.
+	 *
+	 * @param name  The name representing the call status.
+	 * @param value The description of the call status.
+	 */
 	PrimaryModeEnum(String name, String value) {
 		this.name = name;
 		this.value = value;

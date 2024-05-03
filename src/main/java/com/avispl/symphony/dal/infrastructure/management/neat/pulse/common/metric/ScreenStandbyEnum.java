@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric;
 
 /**
- * ScreenStandbyEnum
+ * Enum representing different types of screen standby
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/24/2024
@@ -22,7 +22,12 @@ public enum ScreenStandbyEnum {
 	private final String name;
 	private final String value;
 
-
+	/**
+	 * Constructor for ScreenStandbyEnum.
+	 *
+	 * @param name  The name representing the call status.
+	 * @param value The description of the call status.
+	 */
 	ScreenStandbyEnum(String name, String value) {
 		this.name = name;
 		this.value = value;

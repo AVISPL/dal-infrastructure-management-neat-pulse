@@ -53,7 +53,7 @@ public class NeatPulseCommunicatorTest {
 	void testGetAggregatorData() throws Exception {
 		extendedStatistic = (ExtendedStatistics) neatPulseCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> statistics = extendedStatistic.getStatistics();
-		Assert.assertEquals(2, statistics.size());
+		Assert.assertEquals(3, statistics.size());
 	}
 
 	/**
@@ -63,7 +63,7 @@ public class NeatPulseCommunicatorTest {
 	void testGetMultipleStatistics() throws Exception {
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
-		Thread.sleep(30000);
+		Thread.sleep(300000);
 		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
 		Assert.assertEquals(47, aggregatedDeviceList.size());
 	}

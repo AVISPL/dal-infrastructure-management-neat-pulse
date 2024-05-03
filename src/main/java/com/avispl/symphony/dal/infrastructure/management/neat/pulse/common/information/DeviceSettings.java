@@ -8,7 +8,7 @@ import java.util.Arrays;
 import java.util.Optional;
 
 /**
- * DeviceSettings
+ * Enum representing different types of device settings
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/16/2024
@@ -41,10 +41,10 @@ public enum DeviceSettings {
 	private final String value;
 
 	/**
-	 * Constructor for DeviceInfo.
+	 * Constructor for DeviceSettings.
 	 *
-	 * @param defaultName The default name of the property.
-	 * @param value The code of the control.
+	 * @param defaultName The name of the device property.
+	 * @param value The corresponding value in the device response.
 	 */
 	DeviceSettings(String defaultName, String group, String value) {
 		this.propertyName = defaultName;
@@ -79,6 +79,12 @@ public enum DeviceSettings {
 		return value;
 	}
 
+	/**
+	 * Retrieves the DeviceSettings enum based on its default name.
+	 *
+	 * @param name The default name of the DeviceSettings enum.
+	 * @return The DeviceSettings enum corresponding to the default name, or null if not found.
+	 */
 	public static DeviceSettings getByDefaultName(String name) {
 		Optional<DeviceSettings> property = Arrays.stream(values()).filter(item -> item.getPropertyName().equalsIgnoreCase(name)).findFirst();
 		return property.orElse(null);

@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common;
 
 /**
- * NeatPulseConstant
+ * Class containing constants used in the Neat Pulse application.
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/16/2024
@@ -14,7 +14,7 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common;
 public class NeatPulseConstant {
 	public static final int DEFAULT_NUMBER_THREAD = 8;
 	public static final int START_INDEX = 0;
-	public static final int NUMBER_DEVICE_IN_INTERVAL = 10;
+	public static final int NUMBER_DEVICE_IN_INTERVAL = 70;
 	public static final String TRUE = "true";
 	public static final String FALSE = "false";
 	public static final String EMPTY = "";

@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric;
 
 /**
- * FontSizeEnum
+ * Enum representing different types of font size
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/24/2024

@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common;
 
 /**
- * NeatPulseCommand
+ * Class containing constants for Neat Pulse API commands.
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/16/2024

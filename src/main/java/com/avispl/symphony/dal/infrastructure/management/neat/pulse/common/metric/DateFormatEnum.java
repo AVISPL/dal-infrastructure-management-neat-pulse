@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric;
 
 /**
- * DateFormatEnum
+ * Enum representing different types of date format
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/24/2024
@@ -19,7 +19,12 @@ public enum DateFormatEnum {
 	private final String name;
 	private final String value;
 
-
+	/**
+	 * Constructor for DateFormatEnum.
+	 *
+	 * @param name  The name representing the call status.
+	 * @param value The description of the call status.
+	 */
 	DateFormatEnum(String name, String value) {
 		this.name = name;
 		this.value = value;

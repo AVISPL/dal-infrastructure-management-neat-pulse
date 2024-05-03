@@ -5,7 +5,7 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information;
 
 /**
- * DeviceInfo
+ * Enum representing different types of device information
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/16/2024
@@ -13,7 +13,6 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.info
  */
 public enum DeviceInfo {
 	SERIAL("Serial", "serial"),
-	MODEL("Model", "model"),
 	CONNECTED("Connected", "connected"),
 	FIRMWARE_CURRENT_VERSION("FirmwareCurrentVersion", "firmwareVersion"),
 	FIRMWARE_UPDATE_VERSION("FirmwareLatestVersion", "latestVersion"),
@@ -31,8 +30,8 @@ public enum DeviceInfo {
 	/**
 	 * Constructor for DeviceInfo.
 	 *
-	 * @param defaultName The default name of the property.
-	 * @param value The code of the control.
+	 * @param defaultName The name of the device property.
+	 * @param value The corresponding value in the device response.
 	 */
 	DeviceInfo(String defaultName, String value) {
 		this.propertyName = defaultName;

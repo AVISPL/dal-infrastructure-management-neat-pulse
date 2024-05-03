@@ -6,7 +6,7 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metr
 
 
 /**
- * TimeZoneEnum
+ * Enum representing different types of time zone
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 4/24/2024
@@ -110,7 +110,11 @@ public enum TimeZoneEnum {
 	;
 	private final String name;
 
-
+	/**
+	 * Constructor for TimeZoneEnum.
+	 *
+	 * @param name  The name representing the call status.
+	 */
 	TimeZoneEnum(String name) {
 		this.name = name;
 	}
