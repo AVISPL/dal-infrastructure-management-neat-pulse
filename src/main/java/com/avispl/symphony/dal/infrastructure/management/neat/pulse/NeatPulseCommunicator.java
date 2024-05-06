@@ -63,7 +63,94 @@ import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metri
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.TimeZoneEnum;
 import com.avispl.symphony.dal.util.StringUtils;
 
-
+/**
+ * NeatPulseCommunicator
+ * Supported features are:
+ * Monitoring Aggregator Device:
+ *  <ul>
+ *  <li> - NumberOfDevices</li>
+ *  <li> - NumberOfPulseRooms</li>
+ *  <li> - TimeOfPollingCycle</li>
+ *  <ul>
+ *
+ * General Info Aggregated Device:
+ * <ul>
+ * <li> - Connected</li>
+ * <li> - ConnectionTime</li>
+ * <li> - ControllerMode</li>
+ * <li> - deviceId</li>
+ * <li> - deviceName</li>
+ * <li> - deviceOnline</li>
+ * <li> - FirmwareCurrentVersion</li>
+ * <li> - FirmwareUpdateAvailable</li>
+ * <li> - InCallStatus</li>
+ * <li> - LocalIPAddress</li>
+ * <li> - OTAChannel</li>
+ * <li> - PrimaryMode</li>
+ * <li> - PulseRoomName</li>
+ * <li> - Reboot</li>
+ * <li> - Serial</li>
+ * </ul>
+ *
+ * Accessibility Group:
+ * <ul>
+ * <li> - ColorCorrection</li>
+ * <li> - FontSize</li>
+ * <li> - HighContrastMode</li>
+ * <li> - ScreenReader</li>
+ * </ul>
+ *
+ * AudioAndVideo Group:
+ * <ul>
+ * <li> - USBAudio</li>
+ * </ul>
+ *
+ * Display Group:
+ * <ul>
+ * <li> - Appearance</li>
+ * <li> - AutoWakeup</li>
+ * <li> - DisplayPreference</li>
+ * <li> - HDMICECControl</li>
+ * <li> - KeepScreenOn</li>
+ * <li> - ScreenBrightness(%)</li>
+ * <li> - ScreenBrightnessCurrentValue(%)</li>
+ * <li> - ScreenStandby</li>
+ * </ul>
+ *
+ *
+ * Sensor Information Group:
+ * <ul>
+ * <li> - CO2(ppm)</li>
+ * <li> - Humidity(%)</li>
+ * <li> - Illumination(lux)</li>
+ * <li> - PeopleCount</li>
+ * <li> - Temperature(C)</li>
+ * <li> - Timestamp(GMT)</li>
+ * <li> - VOC(ppb)</li>
+ * <li> - VOCIndex</li>
+ * </ul>
+ *
+ *
+ * System Group:
+ * <ul>
+ * <li> - Bluetooth</li>
+ * <li> - BYODMode</li>
+ * </ul>
+ *
+ * TimeAndLanguage Group:
+ * <ul>
+ * <li> - 24HourTime</li>
+ * <li> - DateFormat</li>
+ * <li> - Language</li>
+ * <li> - NTPServer</li>
+ * <li> - TimeZone</li>
+ *
+ * </ul>
+ *
+ * @author Harry / Symphony Dev Team<br>
+ * Created on 05/06/2024
+ * @since 1.0.0
+ */
 public class NeatPulseCommunicator extends RestCommunicator implements Aggregator, Monitorable, Controller {
 	/**
 	 * Process that is running constantly and triggers collecting data from NeatPulse SE API endpoints, based on the given timeouts and thresholds.
@@ -251,12 +338,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	/**
 	 * start index
 	 */
-	private int startIndex = NeatPulseConstant.START_INDEX;
+	private Integer startIndex = NeatPulseConstant.START_INDEX;
 
 	/**
 	 * end index
 	 */
-	private int endIndex = NeatPulseConstant.NUMBER_DEVICE_IN_INTERVAL;
+	private Integer endIndex = null;
+
+	/**
+	 * number device in interval
+	 */
+	private Integer numberDeviceInInterval;
 
 	/**
 	 * ping mode
@@ -279,6 +371,24 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	public void setPingMode(String pingMode) {
 		this.pingMode = PingMode.ofString(pingMode);
+	}
+
+	/**
+	 * Retrieves {@link #timeOfPollingCycle}
+	 *
+	 * @return value of {@link #timeOfPollingCycle}
+	 */
+	public Integer getTimeOfPollingCycle() {
+		return timeOfPollingCycle;
+	}
+
+	/**
+	 * Sets {@link #timeOfPollingCycle} value
+	 *
+	 * @param timeOfPollingCycle new value of {@link #timeOfPollingCycle}
+	 */
+	public void setTimeOfPollingCycle(Integer timeOfPollingCycle) {
+		this.timeOfPollingCycle = timeOfPollingCycle;
 	}
 
 	/**
@@ -467,7 +577,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 						updateCacheValue(deviceId, property, bodyValue);
 						break;
 					case REBOOT:
-
+						controlRebootDevice(deviceId);
 						break;
 					default:
 						if (logger.isWarnEnabled()) {
@@ -583,6 +693,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		aggregatedDeviceList.clear();
 		cachedMonitoringDevice.clear();
 		deviceList.clear();
+		startIndex = NeatPulseConstant.START_INDEX;
+		endIndex = null;
+		numberDeviceInInterval = null;
 		super.internalDestroy();
 	}
 
@@ -608,6 +721,29 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			throw new IllegalArgumentException(String.format("Failed to apply config: attempted to override profile settings: the following fields contain conflicts: [%s]", name));
 		} catch (Exception e) {
 			throw new IllegalArgumentException(String.format("Can't control %s with value is %s. %s", name, value, e.getMessage()));
+		}
+	}
+
+	/**
+	 * Controls the reboot of the specified device.
+	 *
+	 * @param deviceId the ID of the device to reboot
+	 * @throws IllegalArgumentException if the response is empty or if the status code indicates an error,
+	 * or if an exception occurs during the process
+	 */
+	private void controlRebootDevice(String deviceId) {
+		try {
+			String command = String.format(NeatPulseCommand.REBOOT_DEVICE, this.getLogin(), deviceId);
+			Map<String, String> data = new HashMap<>();
+			JsonNode response = this.doPost(command, data, JsonNode.class);
+			if (response == null) {
+				throw new IllegalArgumentException("The response is empty");
+			}
+			if (response.has(NeatPulseConstant.MESSAGE) && response.has(NeatPulseConstant.STATUS) && !"200".equals(response.get(NeatPulseConstant.STATUS).asText())) {
+				throw new IllegalArgumentException(response.get(NeatPulseConstant.MESSAGE).asText());
+			}
+		} catch (Exception e) {
+			throw new IllegalArgumentException("Can't control Reboot. " + e.getMessage());
 		}
 	}
 
@@ -672,9 +808,13 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void populateDeviceDetails() {
 		int numberOfThreads = getDefaultNumberOfThread();
+		numberDeviceInInterval = 1000 * timeOfPollingCycle / (3 * 60);
 		ExecutorService executorServiceForRetrieveAggregatedData = Executors.newFixedThreadPool(numberOfThreads);
 		List<Future<?>> futures = new ArrayList<>();
 
+		if (endIndex == null) {
+			endIndex = numberDeviceInInterval;
+		}
 		if (endIndex > deviceList.size()) {
 			endIndex = deviceList.size();
 		}
@@ -689,10 +829,10 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		executorServiceForRetrieveAggregatedData.shutdown();
 		if (endIndex == deviceList.size()) {
 			startIndex = NeatPulseConstant.START_INDEX;
-			endIndex = NeatPulseConstant.NUMBER_DEVICE_IN_INTERVAL;
+			endIndex = numberDeviceInInterval;
 		} else {
 			startIndex = endIndex;
-			endIndex += NeatPulseConstant.NUMBER_DEVICE_IN_INTERVAL;
+			endIndex += numberDeviceInInterval;
 		}
 	}
 
@@ -793,7 +933,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				putMapIntoCachedData(deviceId, mappingValue);
 			}
 		} catch (CommandFailureException ex) {
-			logger.warn(String.format("Device %s not support the sensor command", deviceId));
+			// Device not support the sensor command
+			logger.info(String.format("Device %s not support the sensor command", deviceId));
 		} catch (Exception e) {
 			logger.error(String.format("Error when retrieve device sensor by id %s", deviceId), e);
 		}
