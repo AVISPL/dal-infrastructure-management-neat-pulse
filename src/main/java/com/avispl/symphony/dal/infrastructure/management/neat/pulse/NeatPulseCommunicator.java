@@ -10,9 +10,13 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +52,7 @@ import com.avispl.symphony.dal.communicator.RestCommunicator;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.EnumTypeHandler;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseCommand;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseConstant;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseModel;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.PingMode;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceInfo;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSensor;
@@ -950,15 +955,22 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			cachedMonitoringDevice.forEach((key, value) -> {
 				AggregatedDevice aggregatedDevice = new AggregatedDevice();
 				Map<String, String> cachedData = cachedMonitoringDevice.get(key);
-				String deviceName = cachedData.get(DeviceInfo.SERIAL.getPropertyName());
+				String modelCode = cachedData.get(DeviceInfo.MODEL.getPropertyName());
+				String modelName = NeatPulseModel.getNameByValue(modelCode);
+				String roomName = cachedData.get(DeviceInfo.ROOM_NAME.getPropertyName());
 				String deviceStatus = cachedData.get(DeviceInfo.CONNECTED.getPropertyName());
 				aggregatedDevice.setDeviceId(key);
 				aggregatedDevice.setDeviceOnline(false);
+				if (!"Unknown".equals(modelName)) {
+					aggregatedDevice.setDeviceModel(modelName);
+					if (roomName != null) {
+						aggregatedDevice.setDeviceName(modelName + " (" + roomName + ")");
+					}
+				} else {
+					aggregatedDevice.setDeviceName(cachedData.get(DeviceInfo.SERIAL.getPropertyName()));
+				}
 				if (deviceStatus != null) {
 					aggregatedDevice.setDeviceOnline(NeatPulseConstant.TRUE.equalsIgnoreCase(deviceStatus));
-				}
-				if (deviceName != null) {
-					aggregatedDevice.setDeviceName(deviceName);
 				}
 				Map<String, String> stats = new HashMap<>();
 				List<AdvancedControllableProperty> advancedControllableProperties = new ArrayList<>();
@@ -968,7 +980,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				addOrUpdateAggregatedDevice(aggregatedDevice);
 			});
 		}
-		return aggregatedDeviceList;
+		return aggregatedDeviceList.stream().sorted(Comparator.comparing(item -> item.getProperties().get(DeviceInfo.ROOM_NAME.getPropertyName())))
+				.collect(Collectors.toList());
 	}
 
 	/**
@@ -1008,6 +1021,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			String propertyName = item.getPropertyName();
 			String value = getDefaultValueForNullData(cached.get(propertyName));
 			switch (item) {
+				case MODEL:
+					break;
 				case CONNECTION_TIME:
 					stats.put(propertyName, convertDateTimeFormat(value));
 					break;
@@ -1021,7 +1036,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 							stats.put(propertyName, value);
 							updateAvailable = NeatPulseConstant.TRUE;
 						}
-						stats.put("FirmwareUpdateAvailable ", updateAvailable);
+						stats.put("FirmwareUpdateAvailable", updateAvailable);
 					}
 					break;
 				case PRIMARY_MODE:
@@ -1199,9 +1214,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					}
 					break;
 				case NTP_SERVER:
-					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
-						value = NeatPulseConstant.EMPTY;
-					}
 					addAdvancedControlProperties(advancedControllableProperties, stats, createText(propertyName, value), value);
 					break;
 				default:
@@ -1287,14 +1299,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			return inputDateTime;
 		}
 		try {
-			SimpleDateFormat inputFormat = new SimpleDateFormat(NeatPulseConstant.DEFAULT_FORMAT_DATETIME);
-			inputFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
-
-			SimpleDateFormat outputFormat = new SimpleDateFormat(NeatPulseConstant.TARGET_FORMAT_DATETIME);
-			outputFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
-
-			Date date = inputFormat.parse(inputDateTime);
-			return outputFormat.format(date);
+			Instant instant = Instant.parse(inputDateTime);
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern(NeatPulseConstant.TARGET_FORMAT_DATETIME).withZone(ZoneId.of("GMT"));
+			return formatter.format(instant);
 		} catch (Exception e) {
 			logger.warn("Can't convert the date time value");
 			return NeatPulseConstant.NONE;

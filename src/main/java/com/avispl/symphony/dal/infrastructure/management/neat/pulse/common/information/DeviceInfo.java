@@ -14,6 +14,7 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.info
 public enum DeviceInfo {
 	SERIAL("Serial", "serial"),
 	CONNECTED("Connected", "connected"),
+	MODEL("Model", "model"),
 	FIRMWARE_CURRENT_VERSION("FirmwareCurrentVersion", "firmwareVersion"),
 	FIRMWARE_UPDATE_VERSION("FirmwareLatestVersion", "latestVersion"),
 	ROOM_NAME("PulseRoomName", "roomName"),
