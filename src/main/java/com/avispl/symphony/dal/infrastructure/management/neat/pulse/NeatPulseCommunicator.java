@@ -1111,6 +1111,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param stats The map to populate with the extracted device settings information.
 	 */
 	private void populateDeviceSettings(Map<String, String> cached, Map<String, String> stats, List<AdvancedControllableProperty> advancedControllableProperties) {
+		String model = NeatPulseModel.getNameByValue(getDefaultValueForNullData(cached.get(DeviceInfo.MODEL.getPropertyName())));
 		for (DeviceSettings item : DeviceSettings.values()) {
 			String propertyName = item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName();
 			String value = getDefaultValueForNullData(cached.get(propertyName));
@@ -1128,16 +1129,18 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					}
 					break;
 				case SCREEN_STANDBY:
-					String enumName = EnumTypeHandler.getNameByValue(ScreenStandbyEnum.class, value);
-					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
-						addAdvancedControlProperties(advancedControllableProperties, stats,
-								createDropdown(propertyName, EnumTypeHandler.getEnumNames(ScreenStandbyEnum.class), enumName), enumName);
-					} else {
-						stats.put(propertyName, NeatPulseConstant.NONE);
+					if (!NeatPulseModel.NEAT_PAD.getName().equals(model)) {
+						String enumName = EnumTypeHandler.getNameByValue(ScreenStandbyEnum.class, value);
+						if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
+							addAdvancedControlProperties(advancedControllableProperties, stats,
+									createDropdown(propertyName, EnumTypeHandler.getEnumNames(ScreenStandbyEnum.class), enumName), enumName);
+						} else {
+							stats.put(propertyName, NeatPulseConstant.NONE);
+						}
 					}
 					break;
 				case DATE_FORMAT:
-					enumName = EnumTypeHandler.getNameByValue(DateFormatEnum.class, value);
+					String enumName = EnumTypeHandler.getNameByValue(DateFormatEnum.class, value);
 					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
 						addAdvancedControlProperties(advancedControllableProperties, stats,
 								createDropdown(propertyName, EnumTypeHandler.getEnumNames(DateFormatEnum.class), enumName), enumName);
@@ -1181,9 +1184,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 						stats.put(propertyName, NeatPulseConstant.NONE);
 					}
 					break;
-				case AUTO_WAKEUP:
 				case KEEP_SCREEN_ON:
-				case HDMI_CEC_CONTROL:
 				case BLUETOOTH:
 				case BYOD_MODE:
 				case HOUR_TIME:
@@ -1197,6 +1198,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 						addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, NeatPulseConstant.OFF, NeatPulseConstant.ON), String.valueOf(status));
 					}
 					break;
+				case HDMI_CEC_CONTROL:
+				case AUTO_WAKEUP:
+					if (!NeatPulseModel.NEAT_PAD.getName().equals(model)) {
+						if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+							stats.put(propertyName, value);
+						} else {
+							int status = NeatPulseConstant.TRUE.equalsIgnoreCase(value) ? 1 : 0;
+							addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, NeatPulseConstant.OFF, NeatPulseConstant.ON), String.valueOf(status));
+						}
+					}
+					break;
 				case NIGHT_MODE:
 					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
 						stats.put(propertyName, value);
@@ -1206,11 +1218,13 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					}
 					break;
 				case DISPLAY_PREFERENCE:
-					if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
-						stats.put(propertyName, value);
-					} else {
-						int status = NeatPulseConstant.TRUE.equalsIgnoreCase(value) ? 1 : 0;
-						addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, "Higher Resolution", "Lower Latency"), String.valueOf(status));
+					if (!NeatPulseModel.NEAT_PAD.getName().equals(model)) {
+						if (NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+							stats.put(propertyName, value);
+						} else {
+							int status = NeatPulseConstant.TRUE.equalsIgnoreCase(value) ? 1 : 0;
+							addAdvancedControlProperties(advancedControllableProperties, stats, createSwitch(propertyName, status, "Higher Resolution", "Lower Latency"), String.valueOf(status));
+						}
 					}
 					break;
 				case NTP_SERVER:
@@ -1281,7 +1295,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
 			return formatter.format(date);
 		} catch (Exception e) {
-			logger.error("Error when convert Timestamp To Formatted Date");
+			logger.error(String.format("Error when convert Timestamp To Formatted Date with value %s", input), e);
 			return NeatPulseConstant.NONE;
 		}
 	}
@@ -1303,7 +1317,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			DateTimeFormatter formatter = DateTimeFormatter.ofPattern(NeatPulseConstant.TARGET_FORMAT_DATETIME).withZone(ZoneId.of("GMT"));
 			return formatter.format(instant);
 		} catch (Exception e) {
-			logger.warn("Can't convert the date time value");
+			logger.warn(String.format("Can't convert the date time with value %s", inputDateTime), e);
 			return NeatPulseConstant.NONE;
 		}
 	}
