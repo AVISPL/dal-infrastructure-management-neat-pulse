@@ -41,6 +41,7 @@ import javax.security.auth.login.FailedLoginException;
 import com.avispl.symphony.api.dal.control.Controller;
 import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
+import com.avispl.symphony.api.dal.dto.monitor.EndpointStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.Statistics;
 import com.avispl.symphony.api.dal.dto.monitor.aggregator.AggregatedDevice;
@@ -331,7 +332,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private Integer timeOfPollingCycle;
 
 	/**
-	 *
+	 * frequently system
 	 */
 	private Integer frequentlySystem = 0;
 
@@ -953,7 +954,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private List<AggregatedDevice> cloneAndPopulateAggregatedDeviceList() {
 		synchronized (aggregatedDeviceList) {
 			cachedMonitoringDevice.forEach((key, value) -> {
-				AggregatedDevice aggregatedDevice = new AggregatedDevice();
+				Optional<AggregatedDevice> optionalDevice = aggregatedDeviceList.stream()
+						.filter(device -> device.getDeviceId().equals(key)).findFirst();
+				AggregatedDevice aggregatedDevice = optionalDevice.orElse(new AggregatedDevice());
 				Map<String, String> cachedData = cachedMonitoringDevice.get(key);
 				String modelCode = cachedData.get(DeviceInfo.MODEL.getPropertyName());
 				String modelName = NeatPulseModel.getNameByValue(modelCode);
@@ -974,6 +977,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				}
 				Map<String, String> stats = new HashMap<>();
 				List<AdvancedControllableProperty> advancedControllableProperties = new ArrayList<>();
+				String inCallStatus = getDefaultValueForNullData(cachedData.get(DeviceInfo.IN_CALL_STATUS.getPropertyName()));
+				//InCallStatus: NONE, ZOOM, TEAMS
+				setInCall(aggregatedDevice, !NeatPulseConstant.NONE.equalsIgnoreCase(inCallStatus));
 				populateMonitorProperties(cachedData, stats, advancedControllableProperties);
 				aggregatedDevice.setProperties(stats);
 				aggregatedDevice.setControllableProperties(advancedControllableProperties);
@@ -995,6 +1001,42 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			aggregatedDeviceList.removeIf(dev -> dev.getDeviceId().equals(aggregatedDevice.getDeviceId()));
 		}
 		aggregatedDeviceList.add(aggregatedDevice);
+	}
+
+	/**
+	 * Set zoom room in call status
+	 *
+	 * @param device device to change inCall status for
+	 * @param inCall whether the device is in call or not
+	 * */
+	private void setInCall(AggregatedDevice device, boolean inCall) {
+		List<Statistics> statistics = device.getMonitoredStatistics();
+		if (inCall) {
+			if (statistics == null) {
+				statistics = new ArrayList<>();
+				device.setMonitoredStatistics(statistics);
+			}
+			boolean deviceHasEndpointStatistics = false;
+			for (Statistics statsEntry: statistics) {
+				if (statsEntry instanceof EndpointStatistics) {
+					deviceHasEndpointStatistics = true;
+					((EndpointStatistics) statsEntry).setInCall(true);
+				}
+			}
+			if (!deviceHasEndpointStatistics) {
+				EndpointStatistics endpointStatistics = new EndpointStatistics();
+				endpointStatistics.setInCall(true);
+				statistics.add(endpointStatistics);
+			}
+		} else {
+			if (statistics != null) {
+				for (Statistics statsEntry : statistics) {
+					if (statsEntry instanceof EndpointStatistics) {
+						((EndpointStatistics) statsEntry).setInCall(false);
+					}
+				}
+			}
+		}
 	}
 
 	/**
