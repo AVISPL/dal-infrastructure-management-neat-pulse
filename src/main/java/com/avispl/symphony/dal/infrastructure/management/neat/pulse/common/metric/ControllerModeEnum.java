@@ -12,8 +12,8 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metr
  * @since 1.0.0
  */
 public enum ControllerModeEnum {
-	SCHEDULE("schedule", "Room scheduler"),
-	CONTROLLER("controller", "Meeting room controller"),
+	SCHEDULE("schedule", "Room Scheduler"),
+	CONTROLLER("controller", "Room Controller"),
 	;
 	private final String name;
 	private final String value;

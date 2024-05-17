@@ -12,9 +12,9 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metr
  * @since 1.0.0
  */
 public enum CallStatusEnum {
-	NONE("NONE", "Not in a call"),
-	ZOOM("ZOOM", "On a zoom call"),
-	TEAMS("TEAMS", "On a teams call"),
+	NONE("NONE", "IDLE"),
+	ZOOM("ZOOM", "ACTIVE_ZOOM"),
+	TEAMS("TEAMS", "ACTIVE_TEAMS"),
 	;
 	private final String name;
 	private final String value;

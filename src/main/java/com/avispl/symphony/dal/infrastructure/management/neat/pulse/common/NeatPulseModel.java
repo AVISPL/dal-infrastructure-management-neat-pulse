@@ -20,7 +20,9 @@ public enum NeatPulseModel {
 	NEAT_BAR("Neat Bar", "NF19B1"),
 	NEAT_PAD("Neat Pad", "NF19A1"),
 	NEAT_BOARD("Neat Board", "NF20C1"),
-	TEAMS("Neat Center", "NF23L1"),
+	NEAT_CENTER("Neat Center", "NF23L1"),
+	NEAT_BOARD_50("Neat Board 50", "NF22H1"),
+	NEAT_BAR_2("Neat Bar 2", "NF22E1"),
 	;
 	private final String name;
 	private final String value;

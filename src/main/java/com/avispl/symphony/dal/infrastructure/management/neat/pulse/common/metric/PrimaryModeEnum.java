@@ -12,10 +12,10 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metr
  * @since 1.0.0
  */
 public enum PrimaryModeEnum {
-	OOB("oob", "The device is being set up"),
+	OOB("oob", "OOB"),
 	ZOOM("zoom", "Zoom Rooms"),
 	TEAMS("msteams", "Microsoft Teams"),
-	AVOS("avos", "App hub"),
+	AVOS("avos", "App Hub"),
 	USB("usb", "USB BOYD"),
 			;
 	private final String name;
