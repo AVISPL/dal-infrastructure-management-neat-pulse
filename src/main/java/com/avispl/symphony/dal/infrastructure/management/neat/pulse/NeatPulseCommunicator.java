@@ -19,9 +19,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -212,7 +214,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					break loop;
 				}
 				if (flag) {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * timeOfPollingCycle;
+					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
 					flag = false;
 				}
 
@@ -329,7 +331,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	/**
 	 * time of polling cycle
 	 */
-	private Integer timeOfPollingCycle;
+	private Integer devicePollingInterval;
 
 	/**
 	 * frequently system
@@ -357,6 +359,32 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private Integer numberDeviceInInterval;
 
 	/**
+	 * Configurable property for historical properties, comma separated values kept as set locally
+	 */
+	private Set<String> historicalProperties = new HashSet<>();
+
+	/**
+	 * Retrieves {@link #historicalProperties}
+	 *
+	 * @return value of {@link #historicalProperties}
+	 */
+	public String getHistoricalProperties() {
+		return String.join(",", this.historicalProperties);
+	}
+
+	/**
+	 * Sets {@link #historicalProperties} value
+	 *
+	 * @param historicalProperties new value of {@link #historicalProperties}
+	 */
+	public void setHistoricalProperties(String historicalProperties) {
+		this.historicalProperties.clear();
+		Arrays.asList(historicalProperties.split(",")).forEach(propertyName -> {
+			this.historicalProperties.add(propertyName.trim());
+		});
+	}
+
+	/**
 	 * ping mode
 	 */
 	private PingMode pingMode = PingMode.ICMP;
@@ -380,21 +408,21 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * Retrieves {@link #timeOfPollingCycle}
+	 * Retrieves {@link #devicePollingInterval}
 	 *
-	 * @return value of {@link #timeOfPollingCycle}
+	 * @return value of {@link #devicePollingInterval}
 	 */
-	public Integer getTimeOfPollingCycle() {
-		return timeOfPollingCycle;
+	public Integer getDevicePollingInterval() {
+		return devicePollingInterval;
 	}
 
 	/**
-	 * Sets {@link #timeOfPollingCycle} value
+	 * Sets {@link #devicePollingInterval} value
 	 *
-	 * @param timeOfPollingCycle new value of {@link #timeOfPollingCycle}
+	 * @param devicePollingInterval new value of {@link #devicePollingInterval}
 	 */
-	public void setTimeOfPollingCycle(Integer timeOfPollingCycle) {
-		this.timeOfPollingCycle = timeOfPollingCycle;
+	public void setDevicePollingInterval(Integer devicePollingInterval) {
+		this.devicePollingInterval = devicePollingInterval;
 	}
 
 	/**
@@ -421,8 +449,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
 	public NeatPulseCommunicator() throws IOException {
-		if (timeOfPollingCycle == null || timeOfPollingCycle > 15 || timeOfPollingCycle < 1) {
-			timeOfPollingCycle = 10;
+		if (devicePollingInterval == null || devicePollingInterval > 15 || devicePollingInterval < 1) {
+			devicePollingInterval = 10;
 		}
 		this.setTrustAllCertificates(true);
 	}
@@ -496,7 +524,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				retrieveRoomInfo();
 			}
 			frequentlySystem++;
-			if (frequentlySystem >= timeOfPollingCycle / 2) {
+			if (frequentlySystem >= devicePollingInterval / 2) {
 				frequentlySystem = 0;
 			}
 			populateSystemInfo(statistics);
@@ -805,7 +833,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private void populateSystemInfo(Map<String, String> stats) {
 		stats.put("NumberOfDevices", String.valueOf(deviceList.size()));
 		stats.put("NumberOfPulseRooms", String.valueOf(countRoom));
-		stats.put("TimeOfPollingCycle", String.valueOf(timeOfPollingCycle));
+		stats.put("DevicePollingInterval(minutes)", String.valueOf(devicePollingInterval));
 	}
 
 	/**
@@ -814,7 +842,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void populateDeviceDetails() {
 		int numberOfThreads = getDefaultNumberOfThread();
-		numberDeviceInInterval = 1000 * timeOfPollingCycle / (3 * 60);
+		numberDeviceInInterval = 1000 * devicePollingInterval / (3 * 60);
 		ExecutorService executorServiceForRetrieveAggregatedData = Executors.newFixedThreadPool(numberOfThreads);
 		List<Future<?>> futures = new ArrayList<>();
 
@@ -976,12 +1004,14 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					aggregatedDevice.setDeviceOnline(NeatPulseConstant.TRUE.equalsIgnoreCase(deviceStatus));
 				}
 				Map<String, String> stats = new HashMap<>();
+				Map<String, String> dynamicStats = new HashMap<>();
 				List<AdvancedControllableProperty> advancedControllableProperties = new ArrayList<>();
 				String inCallStatus = getDefaultValueForNullData(cachedData.get(DeviceInfo.IN_CALL_STATUS.getPropertyName()));
 				//InCallStatus: NONE, ZOOM, TEAMS
 				setInCall(aggregatedDevice, !NeatPulseConstant.NONE.equalsIgnoreCase(inCallStatus));
-				populateMonitorProperties(cachedData, stats, advancedControllableProperties);
+				populateMonitorProperties(cachedData, stats, dynamicStats, advancedControllableProperties);
 				aggregatedDevice.setProperties(stats);
+				aggregatedDevice.setDynamicStatistics(dynamicStats);
 				aggregatedDevice.setControllableProperties(advancedControllableProperties);
 				addOrUpdateAggregatedDevice(aggregatedDevice);
 			});
@@ -1044,11 +1074,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param cached The cached data containing device information.
 	 * @param stats The map to store monitor properties.
+	 * @param dynamicStats The Dynamic stats to store dynamic properties
 	 * @param advancedControllableProperties The list to store advanced controllable properties.
 	 */
-	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, List<AdvancedControllableProperty> advancedControllableProperties) {
+	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, Map<String, String> dynamicStats, List<AdvancedControllableProperty> advancedControllableProperties) {
 		populateDeviceInfo(cached, stats);
-		populateDeviceSensor(cached, stats);
+		populateDeviceSensor(cached, stats, dynamicStats);
 		populateDeviceSettings(cached, stats, advancedControllableProperties);
 	}
 
@@ -1103,8 +1134,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param cached The cached data containing device sensor information.
 	 * @param stats The map to populate with the extracted sensor information.
+	 * @param dynamicStats The map to populate with the dynamic sensor information.
 	 */
-	private void populateDeviceSensor(Map<String, String> cached, Map<String, String> stats) {
+	private void populateDeviceSensor(Map<String, String> cached, Map<String, String> stats, Map<String, String> dynamicStats) {
 		try {
 			String jsonValue = getDefaultValueForNullData(cached.get(NeatPulseConstant.DEVICE_SENSOR));
 			if (NeatPulseConstant.NONE.equals(jsonValue)) {
@@ -1125,6 +1157,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 							String value = getDefaultValueForNullData(node.get(item.getValue()).asText());
 							switch (item) {
 								case TEMPERATURE:
+									String temperatureValue = roundDoubleValue(value);
+									boolean propertyListed = false;
+									if (!historicalProperties.isEmpty()) {
+										propertyListed = historicalProperties.contains(item.getPropertyName());
+									}
+									if (propertyListed && !NeatPulseConstant.NONE.equalsIgnoreCase(temperatureValue)) {
+										dynamicStats.put(name, temperatureValue);
+									} else {
+										stats.put(name, temperatureValue);
+									}
+									break;
 								case HUMIDITY:
 								case ILLUMINATION:
 									stats.put(name, roundDoubleValue(value));

@@ -65,7 +65,7 @@ public class NeatPulseCommunicatorTest {
 		Map<String, String> statistics = extendedStatistic.getStatistics();
 		Assert.assertEquals("47", statistics.get("NumberOfDevices"));
 		Assert.assertEquals("34", statistics.get("NumberOfPulseRooms"));
-		Assert.assertEquals("10", statistics.get("TimeOfPollingCycle"));
+		Assert.assertEquals("10", statistics.get("DevicePollingInterval(minutes)"));
 	}
 
 	/**
@@ -73,7 +73,7 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetMultipleStatisticsWithTimeOfPollingCycle() throws Exception {
-		neatPulseCommunicator.setTimeOfPollingCycle(2);
+		neatPulseCommunicator.setDevicePollingInterval(2);
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
 		Thread.sleep(30000);
@@ -86,6 +86,21 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetMultipleStatistics() throws Exception {
+		neatPulseCommunicator.setDevicePollingInterval(12);
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(30000);
+		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
+		Assert.assertEquals(47, aggregatedDeviceList.size());
+	}
+
+	/**
+	 * Test case to verify the aggregated device info.
+	 */
+	@Test
+	void testGetMultipleStatisticsWithHistoricalProperties() throws Exception {
+		neatPulseCommunicator.setDevicePollingInterval(2);
+		neatPulseCommunicator.setHistoricalProperties("Temperature(C)");
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
 		Thread.sleep(30000);
