@@ -5,10 +5,6 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse;
 
 import java.io.IOException;
-import java.net.ConnectException;
-import java.net.Socket;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -56,7 +52,6 @@ import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.EnumT
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseCommand;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseConstant;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseModel;
-import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.PingMode;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceInfo;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSensor;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSettings;
@@ -385,29 +380,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * ping mode
-	 */
-	private PingMode pingMode = PingMode.ICMP;
-
-	/**
-	 * Retrieves {@link #pingMode}
-	 *
-	 * @return value of {@link #pingMode}
-	 */
-	public String getPingMode() {
-		return pingMode.name();
-	}
-
-	/**
-	 * Sets {@link #pingMode} value
-	 *
-	 * @param pingMode new value of {@link #pingMode}
-	 */
-	public void setPingMode(String pingMode) {
-		this.pingMode = PingMode.ofString(pingMode);
-	}
-
-	/**
 	 * Retrieves {@link #devicePollingInterval}
 	 *
 	 * @return value of {@link #devicePollingInterval}
@@ -453,58 +425,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			devicePollingInterval = 10;
 		}
 		this.setTrustAllCertificates(true);
-	}
-
-	/**
-	 * {@inheritDoc}
-	 * <p>
-	 *
-	 * Check for available devices before retrieving the value
-	 * ping latency information to Symphony
-	 */
-	@Override
-	public int ping() throws Exception {
-		if (this.pingMode == PingMode.ICMP) {
-			return super.ping();
-		} else if (this.pingMode == PingMode.TCP) {
-			if (isInitialized()) {
-				long pingResultTotal = 0L;
-
-				for (int i = 0; i < this.getPingAttempts(); i++) {
-					long startTime = System.currentTimeMillis();
-
-					try (Socket puSocketConnection = new Socket(this.host, this.getPort())) {
-						puSocketConnection.setSoTimeout(this.getPingTimeout());
-						if (puSocketConnection.isConnected()) {
-							long pingResult = System.currentTimeMillis() - startTime;
-							pingResultTotal += pingResult;
-							if (this.logger.isTraceEnabled()) {
-								this.logger.trace(String.format("PING OK: Attempt #%s to connect to %s on port %s succeeded in %s ms", i + 1, host, this.getPort(), pingResult));
-							}
-						} else {
-							if (this.logger.isDebugEnabled()) {
-								this.logger.debug(String.format("PING DISCONNECTED: Connection to %s did not succeed within the timeout period of %sms", host, this.getPingTimeout()));
-							}
-							return this.getPingTimeout();
-						}
-					} catch (SocketTimeoutException | ConnectException tex) {
-						throw new RuntimeException("Socket connection timed out", tex);
-					} catch (UnknownHostException ex) {
-						throw new UnknownHostException(String.format("Connection timed out, UNKNOWN host %s", host));
-					} catch (Exception e) {
-						if (this.logger.isWarnEnabled()) {
-							this.logger.warn(String.format("PING TIMEOUT: Connection to %s did not succeed, UNKNOWN ERROR %s: ", host, e.getMessage()));
-						}
-						return this.getPingTimeout();
-					}
-				}
-				return Math.max(1, Math.toIntExact(pingResultTotal / this.getPingAttempts()));
-			} else {
-				throw new IllegalStateException("Cannot use device class without calling init() first");
-			}
-		} else {
-			throw new IllegalArgumentException("Unknown PING Mode: " + pingMode);
-		}
 	}
 
 	/**
@@ -730,6 +650,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		startIndex = NeatPulseConstant.START_INDEX;
 		endIndex = null;
 		numberDeviceInInterval = null;
+		historicalProperties.clear();
 		super.internalDestroy();
 	}
 
@@ -1038,7 +959,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param device device to change inCall status for
 	 * @param inCall whether the device is in call or not
-	 * */
+	 */
 	private void setInCall(AggregatedDevice device, boolean inCall) {
 		List<Statistics> statistics = device.getMonitoredStatistics();
 		if (inCall) {
@@ -1047,7 +968,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				device.setMonitoredStatistics(statistics);
 			}
 			boolean deviceHasEndpointStatistics = false;
-			for (Statistics statsEntry: statistics) {
+			for (Statistics statsEntry : statistics) {
 				if (statsEntry instanceof EndpointStatistics) {
 					deviceHasEndpointStatistics = true;
 					((EndpointStatistics) statsEntry).setInCall(true);
@@ -1157,6 +1078,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 							String value = getDefaultValueForNullData(node.get(item.getValue()).asText());
 							switch (item) {
 								case TEMPERATURE:
+								case HUMIDITY:
+								case ILLUMINATION:
 									String temperatureValue = roundDoubleValue(value);
 									boolean propertyListed = false;
 									if (!historicalProperties.isEmpty()) {
@@ -1168,9 +1091,19 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 										stats.put(name, temperatureValue);
 									}
 									break;
-								case HUMIDITY:
-								case ILLUMINATION:
-									stats.put(name, roundDoubleValue(value));
+								case CO2:
+								case PEOPLE_COUNT:
+								case VOC:
+								case VOC_INDEX:
+									propertyListed = false;
+									if (!historicalProperties.isEmpty()) {
+										propertyListed = historicalProperties.contains(item.getPropertyName());
+									}
+									if (propertyListed && !NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+										dynamicStats.put(name, value);
+									} else {
+										stats.put(name, value);
+									}
 									break;
 								case TIMESTAMP:
 									stats.put(name, convertTimestampToFormattedDate(value));

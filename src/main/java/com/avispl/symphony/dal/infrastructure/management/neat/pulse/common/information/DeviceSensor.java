@@ -8,13 +8,13 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.info
  * * Enum representing different types of device sensor
  *
  * @author Harry / Symphony Dev Team<br>
- * Created on 4/16/2024
- * @since 1.0.0
+ * Created on 11/15/2024
+ * @since 1.0.1
  */
 public enum DeviceSensor {
-	CO2("CO2(ppm)", "co2"),
-	HUMIDITY("Humidity(%)", "humidity"),
-	ILLUMINATION("Illumination(lux)", "illumination"),
+	CO2("CO2eq(ppm)", "co2"),
+	HUMIDITY("RelativeHumidity(%)", "humidity"),
+	ILLUMINATION("AmbientLight(lx)", "illumination"),
 	PEOPLE_COUNT("PeopleCount", "people"),
 	TEMPERATURE("Temperature(C)", "temp"),
 	VOC("VOC(ppb)", "voc"),
