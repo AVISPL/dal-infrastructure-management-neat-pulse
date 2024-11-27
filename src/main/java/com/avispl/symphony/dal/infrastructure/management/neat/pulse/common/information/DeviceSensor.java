@@ -19,29 +19,20 @@ public enum DeviceSensor {
 	TEMPERATURE("Temperature(C)", "temp"),
 	VOC("VOC(ppb)", "voc"),
 	VOC_INDEX("VOCIndex", "vocIndex"),
-	TIMESTAMP("Timestamp(GMT)", "timestamp"),
-	;
+	TIMESTAMP("Timestamp(GMT)", "timestamp");
+
 	private final String propertyName;
 	private final String value;
 
 	/**
 	 * Constructor for DeviceSensor.
 	 *
-	 * @param defaultName The name of the device property.
+	 * @param propertyName The name of the device property.
 	 * @param value The corresponding value in the device response.
 	 */
-	DeviceSensor(String defaultName, String value) {
-		this.propertyName = defaultName;
+	DeviceSensor(String propertyName, String value) {
+		this.propertyName = propertyName;
 		this.value = value;
-	}
-
-	/**
-	 * Retrieves {@link #propertyName}
-	 *
-	 * @return value of {@link #propertyName}
-	 */
-	public String getPropertyName() {
-		return propertyName;
 	}
 
 	/**
@@ -51,5 +42,14 @@ public enum DeviceSensor {
 	 */
 	public String getValue() {
 		return value;
+	}
+
+	/**
+	 * Retrieves {@link #propertyName}
+	 *
+	 * @return value of {@link #propertyName}
+	 */
+	public String getPropertyName() {
+		return propertyName;
 	}
 }

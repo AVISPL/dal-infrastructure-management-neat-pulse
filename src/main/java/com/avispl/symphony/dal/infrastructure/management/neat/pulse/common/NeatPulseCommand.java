@@ -14,6 +14,8 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse.common;
 public class NeatPulseCommand {
 	public static final String ALL_DEVICE_ID_COMMAND = "api/v1/orgs/%s/endpoints";
 	public static final String ALL_ROOM_COMMAND = "api/v1/orgs/%s/rooms";
+	public static final String LIST_DEVICE_SENSOR = "api/v1/orgs/%s/endpoints/sensor";
+	public static final String ROOM_SENSOR = "api/v1/orgs/%s/rooms/%s/sensor";
 	public static final String GET_DEVICE_INFO_COMMAND = "api/v1/orgs/%s/endpoints/%s";
 	public static final String GET_DEVICE_SENSOR_COMMAND = "api/v1/orgs/%s/endpoints/%s/sensor";
 	public static final String GET_DEVICE_SETTINGS_COMMAND = "api/v1/orgs/%s/endpoints/%s/config";

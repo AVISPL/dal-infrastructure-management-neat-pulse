@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * NeatPulseModel
+ * NeatPulseModel contains model name and code name
  *
  * @author Harry / Symphony Dev Team<br>
  * Created on 5/7/2024
@@ -22,7 +22,8 @@ public enum NeatPulseModel {
 	NEAT_BOARD("Neat Board", "NF20C1"),
 	NEAT_CENTER("Neat Center", "NF23L1"),
 	NEAT_BOARD_50("Neat Board 50", "NF22H1"),
-	NEAT_BAR_2("Neat Bar 2", "NF22E1"),
+	NEAT_BAR_2("Neat Bar Gen 2", "NF22E1"),
+	NEAT_BOARD_PRO("Neat Board Pro", "NF23K1"),
 	;
 	private final String name;
 	private final String value;
@@ -30,7 +31,7 @@ public enum NeatPulseModel {
 	/**
 	 * Constructor for NeatPulseModel.
 	 *
-	 * @param name  The name representing the call status.
+	 * @param name The name representing the call status.
 	 * @param value The description of the call status.
 	 */
 	NeatPulseModel(String name, String value) {
@@ -63,6 +64,7 @@ public enum NeatPulseModel {
 	 * @return The name corresponding to the given value, or "Unknown" if not found.
 	 */
 	public static String getNameByValue(String value) {
+
 		Optional<String> result = Stream.of(values()).filter(model -> model.getValue().equals(value))
 				.map(NeatPulseModel::getName).findFirst();
 		return result.orElse("Unknown");
