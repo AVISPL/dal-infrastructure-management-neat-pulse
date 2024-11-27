@@ -1214,8 +1214,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private void populateHistoricalProperties(Map<String, String> stats, Map<String, String> dynamicStats, DeviceSensor sensor, String value, String name) {
 		boolean propertyListed = false;
 		if (!historicalProperties.isEmpty()) {
-
-			propertyListed = historicalProperties.contains(sensor.getPropertyName());
+			propertyListed = historicalProperties.contains(sensor.getPropertyName()) || historicalProperties.contains(NeatPulseConstant.ROOM_DEVICE_SENSOR + "#" + sensor.getPropertyName());
 		}
 		if (propertyListed && !NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
 			dynamicStats.put(name, value);
