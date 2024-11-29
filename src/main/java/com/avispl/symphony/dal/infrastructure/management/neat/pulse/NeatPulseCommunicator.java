@@ -236,19 +236,22 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		try {
 			JsonNode response = this.doGet(String.format(NeatPulseCommand.LIST_DEVICE_SENSOR, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.DATA)) {
-				for (JsonNode dataNode : response.get(NeatPulseConstant.DATA)) {
-					String id = dataNode.get("id").asText();
-					JsonNode endpointData = dataNode.get("endpointData");
-
-					if (endpointData != null && endpointData.has("data")) {
-						JsonNode sensorData = endpointData.get("data");
-						mapOfDeviceIdAndDeviceSensor.put(id, sensorData);
+				JsonNode dataArray = response.get(NeatPulseConstant.DATA);
+				mapOfDeviceIdAndDeviceSensor.clear();
+				if (dataArray != null && dataArray.isArray()) {
+					for (JsonNode dataNode : dataArray) {
+						String id = dataNode.get("id").asText();
+						JsonNode endpointData = dataNode.get("endpointData");
+						if (endpointData != null && endpointData.has("data")) {
+							JsonNode sensorData = endpointData.get("data");
+							mapOfDeviceIdAndDeviceSensor.put(id, sensorData);
+						}
 					}
 				}
 			}
 		} catch (CommandFailureException ex) {
 			// Device not support the sensor command
-			logger.info("Device not support the sensor command", ex);
+			logger.warn("Device not support the sensor command", ex);
 		} catch (Exception e) {
 			logger.error("Error when retrieve room sensor information", e);
 		}
@@ -276,7 +279,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				}
 			} catch (CommandFailureException ex) {
 				// Device not support the sensor command
-				logger.info("Device not support the room sensor command", ex);
+				logger.warn("Device not support the room sensor command", ex);
 			} catch (Exception e) {
 				logger.error("Error when retrieve room sensor information", e);
 			}
@@ -550,6 +553,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
 	public NeatPulseCommunicator() throws IOException {
+
 		if (devicePollingInterval == null || devicePollingInterval > 15 || devicePollingInterval < 1) {
 			devicePollingInterval = 10;
 		}
@@ -877,8 +881,13 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ENDPOINTS) && response.get(NeatPulseConstant.ENDPOINTS).isArray()) {
 				deviceList.clear();
-				for (JsonNode node : response.get(NeatPulseConstant.ENDPOINTS)) {
-					deviceList.put(node.get(NeatPulseConstant.ID).asText(), node.get("roomId").asText());
+				JsonNode jsonNode = response.get(NeatPulseConstant.ENDPOINTS);
+				if (jsonNode != null) {
+					for (JsonNode node : jsonNode) {
+						if (node.get(NeatPulseConstant.ID) != null && node.get("roomId") != null) {
+							deviceList.put(node.get(NeatPulseConstant.ID).asText(), node.get("roomId").asText());
+						}
+					}
 				}
 			}
 		} catch (FailedLoginException e) {
@@ -901,6 +910,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			countRoom = 0;
 			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ROOMS) && response.get(NeatPulseConstant.ROOMS).isArray()) {
+				mapOfRoomIdAndRoomName.clear();
 				countRoom = response.get(NeatPulseConstant.ROOMS).size();
 				JsonNode itemValueNode = response.get(NeatPulseConstant.ROOMS);
 				for (JsonNode item : itemValueNode) {
@@ -984,8 +994,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device to be processed.
 	 */
 	private void processDeviceId(String deviceId) {
-		retrieveDeviceInfo(deviceId);
 		retrieveRoomSensorInformation(deviceId);
+		retrieveDeviceInfo(deviceId);
 		retrieveDeviceSettings(deviceId);
 	}
 
