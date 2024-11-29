@@ -5,10 +5,6 @@
 package com.avispl.symphony.dal.infrastructure.management.neat.pulse;
 
 import java.io.IOException;
-import java.net.ConnectException;
-import java.net.Socket;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -56,8 +52,8 @@ import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.EnumT
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseCommand;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseConstant;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseModel;
-import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.PingMode;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceInfo;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceModel;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSensor;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSettings;
 import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.metric.CallStatusEnum;
@@ -234,6 +230,64 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
+	 * Get list devices sensor information
+	 */
+	private void retrieveDeviceSensorInformation() {
+		try {
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.LIST_DEVICE_SENSOR, this.getLogin()), JsonNode.class);
+			if (response != null && response.has(NeatPulseConstant.DATA)) {
+				JsonNode dataArray = response.get(NeatPulseConstant.DATA);
+				mapOfDeviceIdAndDeviceSensor.clear();
+				if (dataArray != null && dataArray.isArray()) {
+					for (JsonNode dataNode : dataArray) {
+						String id = dataNode.get("id").asText();
+						JsonNode endpointData = dataNode.get("endpointData");
+						if (endpointData != null && endpointData.has("data")) {
+							JsonNode sensorData = endpointData.get("data");
+							mapOfDeviceIdAndDeviceSensor.put(id, sensorData);
+						}
+					}
+				}
+			}
+		} catch (CommandFailureException ex) {
+			// Device not support the sensor command
+			logger.warn("Device not support the sensor command", ex);
+		} catch (Exception e) {
+			logger.error("Error when retrieve room sensor information", e);
+		}
+	}
+
+	/**
+	 * Get room sensor information by id
+	 *
+	 * @param id is id of device
+	 */
+	private void retrieveRoomSensorInformation(String id) {
+		synchronized (deviceList) {
+			String roomId = deviceList.get(id);
+			if (StringUtils.isNullOrEmpty(roomId) || mapRoomIdAndDeviceSensor.containsKey(roomId)) {
+				return;
+			}
+			try {
+				JsonNode response = this.doGet(String.format(NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
+				if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
+					JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
+					if (dataNode != null && dataNode.has("data")) {
+						JsonNode sensorData = dataNode.get("data");
+						mapRoomIdAndDeviceSensor.put(roomId, sensorData);
+					}
+				}
+			} catch (CommandFailureException ex) {
+				// Device not support the sensor command
+				logger.warn("Device not support the room sensor command", ex);
+			} catch (Exception e) {
+				logger.error("Error when retrieve room sensor information", e);
+			}
+		}
+	}
+
+
+	/**
 	 * Indicates whether a device is considered as paused.
 	 * True by default so if the system is rebooted and the actual value is lost -> the device won't start stats
 	 * collection unless the {@link NeatPulseCommunicator#retrieveMultipleStatistics()} method is called which will change it
@@ -321,7 +375,23 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	/**
 	 * list of all devices
 	 */
-	private List<String> deviceList = Collections.synchronizedList(new ArrayList<>());
+	private Map<String, String> deviceList = Collections.synchronizedMap(new HashMap<>());
+
+	/**
+	 * store device id and list device sensor information
+	 */
+	private Map<String, JsonNode> mapOfDeviceIdAndDeviceSensor = new HashMap<>();
+
+	/**
+	 * store room id and list device sensor information by room
+	 */
+	private Map<String, JsonNode> mapRoomIdAndDeviceSensor = new HashMap<>();
+
+
+	/**
+	 * list of room id and room name
+	 */
+	private Map<String, String> mapOfRoomIdAndRoomName = new HashMap<>();
 
 	/**
 	 * number of rooms
@@ -342,6 +412,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * number of threads
 	 */
 	private Integer numberThreads;
+
+	/**
+	 * Configurable property for filter room name
+	 */
+	private Set<String> filterByPulseRoomName = new HashSet<>();
+
+
+	/**
+	 * Configurable property for filter excluding room name
+	 */
+	private Set<String> filterByExcludingPulseRoomName = new HashSet<>();
 
 	/**
 	 * start index
@@ -385,29 +466,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * ping mode
-	 */
-	private PingMode pingMode = PingMode.ICMP;
-
-	/**
-	 * Retrieves {@link #pingMode}
-	 *
-	 * @return value of {@link #pingMode}
-	 */
-	public String getPingMode() {
-		return pingMode.name();
-	}
-
-	/**
-	 * Sets {@link #pingMode} value
-	 *
-	 * @param pingMode new value of {@link #pingMode}
-	 */
-	public void setPingMode(String pingMode) {
-		this.pingMode = PingMode.ofString(pingMode);
-	}
-
-	/**
 	 * Retrieves {@link #devicePollingInterval}
 	 *
 	 * @return value of {@link #devicePollingInterval}
@@ -444,67 +502,62 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
+	 * Retrieves {@link #filterByPulseRoomName}
+	 *
+	 * @return value of {@link #filterByPulseRoomName}
+	 */
+	public String getFilterByPulseRoomName() {
+		return String.join(",", this.filterByPulseRoomName);
+	}
+
+	/**
+	 * Sets {@link #filterByPulseRoomName} value
+	 *
+	 * @param filterByPulseRoomName new value of {@link #filterByPulseRoomName}
+	 */
+	public void setFilterByPulseRoomName(String filterByPulseRoomName) {
+		this.filterByPulseRoomName.clear();
+		Arrays.asList(filterByPulseRoomName.split(",")).forEach(propertyName -> {
+			if (StringUtils.isNotNullOrEmpty(propertyName)) {
+				this.filterByPulseRoomName.add(propertyName.trim());
+			}
+		});
+	}
+
+	/**
+	 * Retrieves {@link #filterByExcludingPulseRoomName}
+	 *
+	 * @return value of {@link #filterByExcludingPulseRoomName}
+	 */
+	public String getFilterByExcludingPulseRoomName() {
+		return String.join(",", this.filterByExcludingPulseRoomName);
+	}
+
+	/**
+	 * Sets {@link #filterByExcludingPulseRoomName} value
+	 *
+	 * @param filterByExcludingPulseRoomName new value of {@link #filterByExcludingPulseRoomName}
+	 */
+	public void setFilterByExcludingPulseRoomName(String filterByExcludingPulseRoomName) {
+		this.filterByExcludingPulseRoomName.clear();
+		Arrays.asList(filterByExcludingPulseRoomName.split(",")).forEach(propertyName -> {
+			if (StringUtils.isNotNullOrEmpty(propertyName)) {
+				this.filterByExcludingPulseRoomName.add(propertyName.trim());
+			}
+		});
+	}
+
+	/**
 	 * Constructs a new instance of NeatPulseCommunicator.
 	 *
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
 	public NeatPulseCommunicator() throws IOException {
+
 		if (devicePollingInterval == null || devicePollingInterval > 15 || devicePollingInterval < 1) {
 			devicePollingInterval = 10;
 		}
 		this.setTrustAllCertificates(true);
-	}
-
-	/**
-	 * {@inheritDoc}
-	 * <p>
-	 *
-	 * Check for available devices before retrieving the value
-	 * ping latency information to Symphony
-	 */
-	@Override
-	public int ping() throws Exception {
-		if (this.pingMode == PingMode.ICMP) {
-			return super.ping();
-		} else if (this.pingMode == PingMode.TCP) {
-			if (isInitialized()) {
-				long pingResultTotal = 0L;
-
-				for (int i = 0; i < this.getPingAttempts(); i++) {
-					long startTime = System.currentTimeMillis();
-
-					try (Socket puSocketConnection = new Socket(this.host, this.getPort())) {
-						puSocketConnection.setSoTimeout(this.getPingTimeout());
-						if (puSocketConnection.isConnected()) {
-							long pingResult = System.currentTimeMillis() - startTime;
-							pingResultTotal += pingResult;
-							if (this.logger.isTraceEnabled()) {
-								this.logger.trace(String.format("PING OK: Attempt #%s to connect to %s on port %s succeeded in %s ms", i + 1, host, this.getPort(), pingResult));
-							}
-						} else {
-							if (this.logger.isDebugEnabled()) {
-								this.logger.debug(String.format("PING DISCONNECTED: Connection to %s did not succeed within the timeout period of %sms", host, this.getPingTimeout()));
-							}
-							return this.getPingTimeout();
-						}
-					} catch (SocketTimeoutException | ConnectException tex) {
-						throw new RuntimeException("Socket connection timed out", tex);
-					} catch (UnknownHostException ex) {
-						throw new UnknownHostException(String.format("Connection timed out, UNKNOWN host %s", host));
-					} catch (Exception e) {
-						if (this.logger.isWarnEnabled()) {
-							this.logger.warn(String.format("PING TIMEOUT: Connection to %s did not succeed, UNKNOWN ERROR %s: ", host, e.getMessage()));
-						}
-						return this.getPingTimeout();
-					}
-				}
-				return Math.max(1, Math.toIntExact(pingResultTotal / this.getPingAttempts()));
-			} else {
-				throw new IllegalStateException("Cannot use device class without calling init() first");
-			}
-		} else {
-			throw new IllegalArgumentException("Unknown PING Mode: " + pingMode);
-		}
 	}
 
 	/**
@@ -522,6 +575,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			if (frequentlySystem == 0) {
 				retrieveSystemInfo();
 				retrieveRoomInfo();
+				retrieveDeviceSensorInformation();
+				filterRoomName();
 			}
 			frequentlySystem++;
 			if (frequentlySystem >= devicePollingInterval / 2) {
@@ -534,6 +589,33 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			reentrantLock.unlock();
 		}
 		return Collections.singletonList(localExtendedStatistics);
+	}
+
+	/**
+	 * Filter device by pulse room name
+	 */
+	private void filterRoomName() {
+		if (!filterByExcludingPulseRoomName.isEmpty()) {
+			List<String> deviceIds = mapOfRoomIdAndRoomName.entrySet().stream()
+					.filter(entry -> filterByExcludingPulseRoomName.contains(entry.getValue()))
+					.map(Map.Entry::getKey)
+					.collect(Collectors.toList());
+			if (!deviceIds.isEmpty()) {
+				mapOfRoomIdAndRoomName.entrySet().removeIf(entry -> deviceIds.contains(entry.getKey()));
+			}
+		}
+		if (!filterByPulseRoomName.isEmpty()) {
+			List<String> deviceId = mapOfRoomIdAndRoomName.entrySet().stream()
+					.filter(entry -> filterByPulseRoomName.contains(entry.getValue()))
+					.map(Map.Entry::getKey)
+					.collect(Collectors.toList());
+			if (deviceId.isEmpty()) {
+				mapOfRoomIdAndRoomName.clear();
+			} else {
+				mapOfRoomIdAndRoomName.entrySet().removeIf(entry -> !deviceId.contains(entry.getKey()));
+			}
+		}
+		deviceList.entrySet().removeIf(entry -> !mapOfRoomIdAndRoomName.keySet().contains(entry.getValue()));
 	}
 
 	/**
@@ -730,6 +812,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		startIndex = NeatPulseConstant.START_INDEX;
 		endIndex = null;
 		numberDeviceInInterval = null;
+		historicalProperties.clear();
+		filterByExcludingPulseRoomName.clear();
+		filterByPulseRoomName.clear();
+		mapRoomIdAndDeviceSensor.clear();
+		mapOfRoomIdAndRoomName.clear();
+		mapOfDeviceIdAndDeviceSensor.clear();
 		super.internalDestroy();
 	}
 
@@ -793,8 +881,13 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ENDPOINTS) && response.get(NeatPulseConstant.ENDPOINTS).isArray()) {
 				deviceList.clear();
-				for (JsonNode node : response.get(NeatPulseConstant.ENDPOINTS)) {
-					deviceList.add(node.get(NeatPulseConstant.ID).asText());
+				JsonNode jsonNode = response.get(NeatPulseConstant.ENDPOINTS);
+				if (jsonNode != null) {
+					for (JsonNode node : jsonNode) {
+						if (node.get(NeatPulseConstant.ID) != null && node.get("roomId") != null) {
+							deviceList.put(node.get(NeatPulseConstant.ID).asText(), node.get("roomId").asText());
+						}
+					}
 				}
 			}
 		} catch (FailedLoginException e) {
@@ -817,7 +910,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			countRoom = 0;
 			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ROOMS) && response.get(NeatPulseConstant.ROOMS).isArray()) {
+				mapOfRoomIdAndRoomName.clear();
 				countRoom = response.get(NeatPulseConstant.ROOMS).size();
+				JsonNode itemValueNode = response.get(NeatPulseConstant.ROOMS);
+				for (JsonNode item : itemValueNode) {
+					mapOfRoomIdAndRoomName.put(item.get("id").asText(), item.get("name").asText());
+				}
 			}
 		} catch (Exception ex) {
 			logger.error(String.format("Error when retrieve room information. %s", ex.getMessage()));
@@ -853,9 +951,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			endIndex = deviceList.size();
 		}
 		synchronized (deviceList) {
+			List<Map.Entry<String, String>> entries = new ArrayList<>(deviceList.entrySet());
 			for (int i = startIndex; i < endIndex; i++) {
 				int index = i;
-				Future<?> future = executorServiceForRetrieveAggregatedData.submit(() -> processDeviceId(deviceList.get(index)));
+				Future<?> future = executorServiceForRetrieveAggregatedData.submit(
+						() -> processDeviceId(entries.get(index).getKey())
+				);
 				futures.add(future);
 			}
 		}
@@ -893,8 +994,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device to be processed.
 	 */
 	private void processDeviceId(String deviceId) {
+		retrieveRoomSensorInformation(deviceId);
 		retrieveDeviceInfo(deviceId);
-		retrieveDeviceSensor(deviceId);
 		retrieveDeviceSettings(deviceId);
 	}
 
@@ -954,27 +1055,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * Retrieves sensor data for the specified device ID.
-	 *
-	 * @param deviceId The ID of the device.
-	 */
-	private void retrieveDeviceSensor(String deviceId) {
-		try {
-			JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SENSOR_COMMAND, this.getLogin(), deviceId), JsonNode.class);
-			if (response != null && response.has(NeatPulseConstant.ENDPOINT_DATA) && response.get(NeatPulseConstant.ENDPOINT_DATA).has(NeatPulseConstant.DATA)) {
-				Map<String, String> mappingValue = new HashMap<>();
-				mappingValue.put(NeatPulseConstant.DEVICE_SENSOR, response.get(NeatPulseConstant.ENDPOINT_DATA).get(NeatPulseConstant.DATA).toString());
-				putMapIntoCachedData(deviceId, mappingValue);
-			}
-		} catch (CommandFailureException ex) {
-			// Device not support the sensor command
-			logger.info(String.format("Device %s not support the sensor command", deviceId));
-		} catch (Exception e) {
-			logger.error(String.format("Error when retrieve device sensor by id %s", deviceId), e);
-		}
-	}
-
-	/**
 	 * Clones the cached monitoring device list and populates the aggregated device list.
 	 *
 	 * @return The populated aggregated device list.
@@ -982,8 +1062,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private List<AggregatedDevice> cloneAndPopulateAggregatedDeviceList() {
 		synchronized (aggregatedDeviceList) {
 			cachedMonitoringDevice.forEach((key, value) -> {
-				Optional<AggregatedDevice> optionalDevice = aggregatedDeviceList.stream()
-						.filter(device -> device.getDeviceId().equals(key)).findFirst();
+				Optional<AggregatedDevice> optionalDevice = aggregatedDeviceList.stream().filter(device -> device.getDeviceId().equals(key)).findFirst();
 				AggregatedDevice aggregatedDevice = optionalDevice.orElse(new AggregatedDevice());
 				Map<String, String> cachedData = cachedMonitoringDevice.get(key);
 				String modelCode = cachedData.get(DeviceInfo.MODEL.getPropertyName());
@@ -1009,15 +1088,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				String inCallStatus = getDefaultValueForNullData(cachedData.get(DeviceInfo.IN_CALL_STATUS.getPropertyName()));
 				//InCallStatus: NONE, ZOOM, TEAMS
 				setInCall(aggregatedDevice, !NeatPulseConstant.NONE.equalsIgnoreCase(inCallStatus));
-				populateMonitorProperties(cachedData, stats, dynamicStats, advancedControllableProperties);
+				populateMonitorProperties(cachedData, stats, advancedControllableProperties, modelCode, aggregatedDevice.getDeviceId());
+				if (!NeatPulseModel.NEAT_PAD.getValue().equalsIgnoreCase(modelCode) && !NeatPulseModel.NEAT_CENTER.getValue().equalsIgnoreCase(modelCode)) {
+					populateRoomSensor(aggregatedDevice.getDeviceId(), stats, dynamicStats);
+				}
 				aggregatedDevice.setProperties(stats);
 				aggregatedDevice.setDynamicStatistics(dynamicStats);
 				aggregatedDevice.setControllableProperties(advancedControllableProperties);
 				addOrUpdateAggregatedDevice(aggregatedDevice);
 			});
 		}
-		return aggregatedDeviceList.stream().sorted(Comparator.comparing(item -> item.getProperties().get(DeviceInfo.ROOM_NAME.getPropertyName())))
-				.collect(Collectors.toList());
+		return aggregatedDeviceList.stream().sorted(Comparator.comparing(item -> item.getProperties().get(DeviceInfo.ROOM_NAME.getPropertyName()))).collect(Collectors.toList());
 	}
 
 	/**
@@ -1038,7 +1119,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param device device to change inCall status for
 	 * @param inCall whether the device is in call or not
-	 * */
+	 */
 	private void setInCall(AggregatedDevice device, boolean inCall) {
 		List<Statistics> statistics = device.getMonitoredStatistics();
 		if (inCall) {
@@ -1047,7 +1128,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				device.setMonitoredStatistics(statistics);
 			}
 			boolean deviceHasEndpointStatistics = false;
-			for (Statistics statsEntry: statistics) {
+			for (Statistics statsEntry : statistics) {
 				if (statsEntry instanceof EndpointStatistics) {
 					deviceHasEndpointStatistics = true;
 					((EndpointStatistics) statsEntry).setInCall(true);
@@ -1074,13 +1155,82 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param cached The cached data containing device information.
 	 * @param stats The map to store monitor properties.
-	 * @param dynamicStats The Dynamic stats to store dynamic properties
 	 * @param advancedControllableProperties The list to store advanced controllable properties.
+	 * @param modelCode is code name of sensor device
 	 */
-	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, Map<String, String> dynamicStats, List<AdvancedControllableProperty> advancedControllableProperties) {
+	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, List<AdvancedControllableProperty> advancedControllableProperties,
+			String modelCode, String deviceId) {
 		populateDeviceInfo(cached, stats);
-		populateDeviceSensor(cached, stats, dynamicStats);
+		populateDeviceSensor(stats, modelCode, deviceId);
 		populateDeviceSettings(cached, stats, advancedControllableProperties);
+	}
+
+	/**
+	 * Populates monitor properties including room sensor data,
+	 *
+	 * @param stats The map to store monitor properties.
+	 * @param dynamicStats The map to store historical properties.
+	 */
+	private void populateRoomSensor(String deviceId, Map<String, String> stats, Map<String, String> dynamicStats) {
+		try {
+			String roomId = deviceList.get(deviceId);
+			JsonNode roomSensorInformation = mapRoomIdAndDeviceSensor.get(roomId);
+			if (roomSensorInformation != null && roomSensorInformation.isArray()) {
+				int index = 0;
+				for (JsonNode node : roomSensorInformation) {
+					index++;
+					String group = NeatPulseConstant.ROOM_DEVICE_SENSOR + index + NeatPulseConstant.HASH;
+					if (roomSensorInformation.size() == 1) {
+						group = NeatPulseConstant.ROOM_DEVICE_SENSOR + NeatPulseConstant.HASH;
+					}
+					for (DeviceSensor sensor : DeviceSensor.values()) {
+						if (node.has(sensor.getValue())) {
+							String name = group + sensor.getPropertyName();
+							String value = getDefaultValueForNullData(node.get(sensor.getValue()).asText());
+							switch (sensor) {
+								case TEMPERATURE:
+								case HUMIDITY:
+								case ILLUMINATION:
+									String temperatureValue = roundDoubleValue(value);
+									populateHistoricalProperties(stats, dynamicStats, sensor, temperatureValue, name);
+									break;
+								case CO2:
+								case PEOPLE_COUNT:
+								case VOC:
+								case VOC_INDEX:
+									populateHistoricalProperties(stats, dynamicStats, sensor, value, name);
+									break;
+								case TIMESTAMP:
+									stats.put(name, convertTimestampToFormattedDate(value));
+									break;
+								default:
+									stats.put(name, value);
+									break;
+							}
+						}
+					}
+				}
+			}
+		} catch (Exception e) {
+			logger.error("Error while populate Room sensor Info", e);
+		}
+	}
+
+	/**
+	 * populate historical properties if config
+	 *
+	 * @param sensor the
+	 */
+	private void populateHistoricalProperties(Map<String, String> stats, Map<String, String> dynamicStats, DeviceSensor sensor, String value, String name) {
+		boolean propertyListed = false;
+		if (!historicalProperties.isEmpty()) {
+			propertyListed = historicalProperties.contains(sensor.getPropertyName()) || historicalProperties.contains(NeatPulseConstant.ROOM_DEVICE_SENSOR + "#" + sensor.getPropertyName());
+		}
+		if (propertyListed && !NeatPulseConstant.NONE.equalsIgnoreCase(value)) {
+			dynamicStats.put(name, value);
+		} else {
+			stats.put(name, value);
+		}
 	}
 
 	/**
@@ -1132,18 +1282,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * Populates device sensor information into the specified {@code stats} map based on the cached data.
 	 * This method parses the JSON data from the cached device sensor information and extracts relevant sensor properties.
 	 *
-	 * @param cached The cached data containing device sensor information.
 	 * @param stats The map to populate with the extracted sensor information.
-	 * @param dynamicStats The map to populate with the dynamic sensor information.
 	 */
-	private void populateDeviceSensor(Map<String, String> cached, Map<String, String> stats, Map<String, String> dynamicStats) {
+	private void populateDeviceSensor(Map<String, String> stats, String modelCode, String deviceId) {
 		try {
-			String jsonValue = getDefaultValueForNullData(cached.get(NeatPulseConstant.DEVICE_SENSOR));
-			if (NeatPulseConstant.NONE.equals(jsonValue)) {
-				return;
-			}
-			JsonNode sensorJson = objectMapper.readTree(jsonValue);
-			if (sensorJson.isArray()) {
+			JsonNode sensorJson = mapOfDeviceIdAndDeviceSensor.get(deviceId);
+			if (sensorJson != null && sensorJson.isArray()) {
 				int index = 0;
 				for (JsonNode node : sensorJson) {
 					index++;
@@ -1151,26 +1295,23 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					if (sensorJson.size() == 1) {
 						group = NeatPulseConstant.SENSOR_INFORMATION + NeatPulseConstant.HASH;
 					}
-					for (DeviceSensor item : DeviceSensor.values()) {
-						if (node.has(item.getValue())) {
-							String name = group + item.getPropertyName();
-							String value = getDefaultValueForNullData(node.get(item.getValue()).asText());
-							switch (item) {
+
+					DeviceModel model = DeviceModel.getByDefaultName(modelCode);
+					for (DeviceSensor sensor : model.getSupportedSensors()) {
+						if (node.has(sensor.getValue())) {
+							String name = group + sensor.getPropertyName();
+							String value = getDefaultValueForNullData(node.get(sensor.getValue()).asText());
+							switch (sensor) {
 								case TEMPERATURE:
-									String temperatureValue = roundDoubleValue(value);
-									boolean propertyListed = false;
-									if (!historicalProperties.isEmpty()) {
-										propertyListed = historicalProperties.contains(item.getPropertyName());
-									}
-									if (propertyListed && !NeatPulseConstant.NONE.equalsIgnoreCase(temperatureValue)) {
-										dynamicStats.put(name, temperatureValue);
-									} else {
-										stats.put(name, temperatureValue);
-									}
-									break;
 								case HUMIDITY:
 								case ILLUMINATION:
 									stats.put(name, roundDoubleValue(value));
+									break;
+								case CO2:
+								case PEOPLE_COUNT:
+								case VOC:
+								case VOC_INDEX:
+									stats.put(name, value);
 									break;
 								case TIMESTAMP:
 									stats.put(name, convertTimestampToFormattedDate(value));
@@ -1217,8 +1358,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					if (!NeatPulseModel.NEAT_PAD.getName().equals(model)) {
 						String enumName = EnumTypeHandler.getNameByValue(ScreenStandbyEnum.class, value);
 						if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
-							addAdvancedControlProperties(advancedControllableProperties, stats,
-									createDropdown(propertyName, EnumTypeHandler.getEnumNames(ScreenStandbyEnum.class), enumName), enumName);
+							addAdvancedControlProperties(advancedControllableProperties, stats, createDropdown(propertyName, EnumTypeHandler.getEnumNames(ScreenStandbyEnum.class), enumName), enumName);
 						} else {
 							stats.put(propertyName, NeatPulseConstant.NONE);
 						}
@@ -1227,8 +1367,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				case DATE_FORMAT:
 					String enumName = EnumTypeHandler.getNameByValue(DateFormatEnum.class, value);
 					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
-						addAdvancedControlProperties(advancedControllableProperties, stats,
-								createDropdown(propertyName, EnumTypeHandler.getEnumNames(DateFormatEnum.class), enumName), enumName);
+						addAdvancedControlProperties(advancedControllableProperties, stats, createDropdown(propertyName, EnumTypeHandler.getEnumNames(DateFormatEnum.class), enumName), enumName);
 					} else {
 						stats.put(propertyName, NeatPulseConstant.NONE);
 					}
@@ -1236,8 +1375,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				case LANGUAGE:
 					enumName = EnumTypeHandler.getNameByValue(LanguageEnum.class, value);
 					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
-						addAdvancedControlProperties(advancedControllableProperties, stats,
-								createDropdown(propertyName, EnumTypeHandler.getEnumNames(LanguageEnum.class), enumName), enumName);
+						addAdvancedControlProperties(advancedControllableProperties, stats, createDropdown(propertyName, EnumTypeHandler.getEnumNames(LanguageEnum.class), enumName), enumName);
 					} else {
 						stats.put(propertyName, NeatPulseConstant.NONE);
 					}
@@ -1263,8 +1401,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				case COLOR_CORRECTION:
 					enumName = EnumTypeHandler.getNameByValue(ColorCorrectionEnum.class, value);
 					if (!NeatPulseConstant.NONE.equalsIgnoreCase(enumName)) {
-						addAdvancedControlProperties(advancedControllableProperties, stats,
-								createDropdown(propertyName, EnumTypeHandler.getEnumNames(ColorCorrectionEnum.class), enumName), enumName);
+						addAdvancedControlProperties(advancedControllableProperties, stats, createDropdown(propertyName, EnumTypeHandler.getEnumNames(ColorCorrectionEnum.class), enumName), enumName);
 					} else {
 						stats.put(propertyName, NeatPulseConstant.NONE);
 					}
@@ -1453,7 +1590,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private void updateCacheValue(String deviceId, String name, String value) {
 		cachedMonitoringDevice.computeIfAbsent(deviceId, k -> new HashMap<>()).put(name, value);
 		String roomName = cachedMonitoringDevice.get(deviceId).get(DeviceInfo.ROOM_NAME.getPropertyName());
-		for (String id : deviceList) {
+		for (String id : deviceList.values()) {
 			if (roomName.equals(cachedMonitoringDevice.get(id).get(DeviceInfo.ROOM_NAME.getPropertyName()))) {
 				cachedMonitoringDevice.computeIfAbsent(id, k -> new HashMap<>()).put(name, value);
 			}

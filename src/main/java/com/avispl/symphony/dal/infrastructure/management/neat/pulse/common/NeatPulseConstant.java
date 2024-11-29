@@ -23,11 +23,13 @@ public class NeatPulseConstant {
 	public static final String SENSOR_INFORMATION = "SensorInformation";
 	public static final String HASH = "#";
 	public static final String DEVICE_SENSOR = "DeviceSensor";
+	public static final String ROOM_DEVICE_SENSOR = "RoomSensorInformation";
 	public static final String DEFAULT_FORMAT_DATETIME = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
 	public static final String TARGET_FORMAT_DATETIME = "MMM d, yyyy, h:mm a";
 	public static final String ENDPOINTS = "endpoints";
 	public static final String ID = "id";
 	public static final String ROOMS = "rooms";
+	public static final String ROOM_DATA = "roomData";
 	public static final String ENDPOINT_DATA = "endpointData";
 	public static final String DATA = "data";
 	public static final String CONFIG = "config";

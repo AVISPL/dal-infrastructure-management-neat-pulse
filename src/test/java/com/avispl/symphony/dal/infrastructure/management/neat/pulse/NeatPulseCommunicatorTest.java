@@ -7,6 +7,7 @@ package com.avispl.symphony.dal.infrastructure.management.neat.pulse;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
@@ -17,6 +18,10 @@ import com.avispl.symphony.api.dal.dto.control.AdvancedControllableProperty;
 import com.avispl.symphony.api.dal.dto.control.ControllableProperty;
 import com.avispl.symphony.api.dal.dto.monitor.ExtendedStatistics;
 import com.avispl.symphony.api.dal.dto.monitor.aggregator.AggregatedDevice;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseConstant;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.NeatPulseModel;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceModel;
+import com.avispl.symphony.dal.infrastructure.management.neat.pulse.common.information.DeviceSensor;
 
 /**
  * NeatPulseCommunicatorTest
@@ -415,5 +420,81 @@ public class NeatPulseCommunicatorTest {
 		Optional<AdvancedControllableProperty> advancedControllableProperty = aggregatedDeviceList.get(1).getControllableProperties().stream().filter(item ->
 				property.equals(item.getName())).findFirst();
 		Assert.assertEquals(value, advancedControllableProperty.get().getValue());
+	}
+
+	/**
+	 * Test support room sensor information
+	 *
+	 * Expect get room information successfully
+	 */
+	@Test
+	void testRoomSensorInformation() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(30000);
+		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
+		Optional<AggregatedDevice> aggregatedDevice = aggregatedDeviceList.stream().filter(item -> item.getDeviceId().equals("58fdaf7d-beb6-4d5c-ad35-aa28e84e4358")).findFirst();
+		if (aggregatedDevice.isPresent()) {
+			Map<String, String> stats = aggregatedDevice.get().getStatistics();
+			DeviceModel model = DeviceModel.getByDefaultName(NeatPulseModel.NEAT_BAR.getName());
+			for (DeviceSensor sensor : model.getSupportedSensors()) {
+				Assert.assertNotNull(stats.get(NeatPulseConstant.ROOM_DEVICE_SENSOR + "#" + sensor.getPropertyName()));
+			}
+		}
+	}
+
+	/**
+	 * Test does not support room sensor information with neat par and neat sensor model
+	 *
+	 * Expect get room information successfully
+	 */
+	@Test
+	void testRoomSensorInformationNotSupportModel() throws Exception {
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(30000);
+		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
+		List<AggregatedDevice> filteredDeviceList = aggregatedDeviceList.stream()
+				.filter(item -> item.getDeviceModel().equals(NeatPulseModel.NEAT_PAD.getName())
+						|| item.getDeviceModel().equals(NeatPulseModel.NEAT_CENTER.getName()))
+				.collect(Collectors.toList());
+
+		for (AggregatedDevice aggregatedDevice : filteredDeviceList) {
+			Map<String, String> stats = aggregatedDevice.getStatistics();
+			if (aggregatedDevice.getDeviceModel().equals(NeatPulseModel.NEAT_PAD.getName())) {
+				DeviceModel model = DeviceModel.getByDefaultName(NeatPulseModel.NEAT_PAD.getName());
+				for (DeviceSensor sensor : model.getSupportedSensors()) {
+					Assert.assertNull(stats.get(NeatPulseConstant.ROOM_DEVICE_SENSOR + "#" + sensor.getPropertyName()));
+				}
+			}
+			if (aggregatedDevice.getDeviceModel().equals(NeatPulseModel.NEAT_CENTER.getName())) {
+				DeviceModel model = DeviceModel.getByDefaultName(NeatPulseModel.NEAT_CENTER.getName());
+				for (DeviceSensor sensor : model.getSupportedSensors()) {
+					Assert.assertNull(stats.get(NeatPulseConstant.ROOM_DEVICE_SENSOR + "#" + sensor.getPropertyName()));
+				}
+			}
+		}
+	}
+
+	/**
+	 * Test support room sensor information
+	 *
+	 * Expect get room information successfully
+	 */
+	@Test
+	void testHistoricalProperties() throws Exception {
+		neatPulseCommunicator.setHistoricalProperties("");
+		neatPulseCommunicator.getMultipleStatistics();
+		neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(30000);
+		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
+		Optional<AggregatedDevice> aggregatedDevice = aggregatedDeviceList.stream().filter(item -> item.getDeviceId().equals("58fdaf7d-beb6-4d5c-ad35-aa28e84e4358")).findFirst();
+		if (aggregatedDevice.isPresent()) {
+			Map<String, String> stats = aggregatedDevice.get().getStatistics();
+			DeviceModel model = DeviceModel.getByDefaultName(NeatPulseModel.NEAT_BAR.getName());
+			for (DeviceSensor sensor : model.getSupportedSensors()) {
+				Assert.assertNotNull(stats.get(NeatPulseConstant.ROOM_DEVICE_SENSOR + "#" + sensor.getPropertyName()));
+			}
+		}
 	}
 }
