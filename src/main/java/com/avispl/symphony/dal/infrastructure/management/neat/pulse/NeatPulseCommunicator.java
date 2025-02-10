@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.util.CollectionUtils;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -251,7 +252,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			}
 		} catch (CommandFailureException ex) {
 			// Device not support the sensor command
-			logger.warn("Device not support the sensor command", ex);
+			logger.warn("Device not support the sensor command");
 		} catch (Exception e) {
 			logger.error("Error when retrieve room sensor information", e);
 		}
@@ -268,20 +269,49 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			if (StringUtils.isNullOrEmpty(roomId) || mapRoomIdAndDeviceSensor.containsKey(roomId)) {
 				return;
 			}
-			try {
-				JsonNode response = this.doGet(String.format(NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
-				if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
-					JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
-					if (dataNode != null && dataNode.has("data")) {
-						JsonNode sensorData = dataNode.get("data");
-						mapRoomIdAndDeviceSensor.put(roomId, sensorData);
+
+			int maxRetries = 3;
+			int retryCount = 0;
+			long waitTime = 500;
+
+			while (retryCount < maxRetries) {
+				try {
+					JsonNode response = this.doGet(String.format(NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
+					if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
+						JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
+						if (dataNode != null && dataNode.has("data")) {
+							JsonNode sensorData = dataNode.get("data");
+							mapRoomIdAndDeviceSensor.put(roomId, sensorData);
+							return;
+						}
 					}
+				} catch (CommandFailureException ex) {
+					if (ex.getStatusCode() == HttpStatus.NOT_FOUND.value()) {
+						logger.warn("Device not support the room sensor command");
+						break;
+					} else if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+						retryCount++;
+						if (retryCount < maxRetries) {
+							logger.info("Too many requests, retrying... Attempt " + retryCount);
+							try {
+								Thread.sleep(waitTime);
+							} catch (InterruptedException ie) {
+								Thread.currentThread().interrupt();
+								break;
+							}
+							waitTime *= 2;
+						} else {
+							logger.info("Max retries reached. Skipping request for room sensor: " + id);
+							break;
+						}
+					} else {
+						logger.error("Error when retrieving room sensor information", ex);
+						break;
+					}
+				} catch (Exception e) {
+					logger.error("Error when retrieving room sensor information", e);
+					break;
 				}
-			} catch (CommandFailureException ex) {
-				// Device not support the sensor command
-				logger.warn("Device not support the room sensor command", ex);
-			} catch (Exception e) {
-				logger.error("Error when retrieve room sensor information", e);
 			}
 		}
 	}
@@ -893,7 +923,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		} catch (FailedLoginException e) {
 			throw new FailedLoginException("Error when the login. Please check the password");
 		} catch (CommandFailureException ex1) {
-			throw new ResourceNotReachableException("Error when retrieve system information", ex1);
+			logger.error("Error when retrieve system information", ex1);
 		} catch (Exception ex) {
 			logger.error(String.format("Error when retrieve system information. %s", ex.getMessage()));
 		}
@@ -994,9 +1024,16 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device to be processed.
 	 */
 	private void processDeviceId(String deviceId) {
-		retrieveRoomSensorInformation(deviceId);
-		retrieveDeviceInfo(deviceId);
-		retrieveDeviceSettings(deviceId);
+		try {
+			retrieveRoomSensorInformation(deviceId);
+            Thread.sleep(500);
+        	retrieveDeviceInfo(deviceId);
+			Thread.sleep(500);
+			retrieveDeviceSettings(deviceId);
+			Thread.sleep(500);
+		} catch (InterruptedException e) {
+			logger.error("An exception occurred while processing the device.", e);
+		}
 	}
 
 	/**
@@ -1005,28 +1042,52 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device.
 	 */
 	private void retrieveDeviceInfo(String deviceId) {
-		try {
-			JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
-			if (response != null) {
-				Map<String, String> mappingValue = new HashMap<>();
-				for (DeviceInfo item : DeviceInfo.values()) {
-					if (!NeatPulseConstant.EMPTY.equals(item.getValue())) {
-						String value = NeatPulseConstant.EMPTY;
-						JsonNode itemValueNode = response.get(item.getValue());
-						if (itemValueNode != null) {
-							if (itemValueNode.isArray()) {
-								value = itemValueNode.toString();
-							} else {
-								value = itemValueNode.asText();
+		int maxRetries = 3;
+		int retryCount = 0;
+		long waitTime = 500;
+
+		while (retryCount < maxRetries) {
+			try {
+				JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+				if (response != null) {
+					Map<String, String> mappingValue = new HashMap<>();
+					for (DeviceInfo item : DeviceInfo.values()) {
+						if (!NeatPulseConstant.EMPTY.equals(item.getValue())) {
+							String value = NeatPulseConstant.EMPTY;
+							JsonNode itemValueNode = response.get(item.getValue());
+							if (itemValueNode != null) {
+								value = itemValueNode.isArray() ? itemValueNode.toString() : itemValueNode.asText();
 							}
+							mappingValue.put(item.getPropertyName(), value);
 						}
-						mappingValue.put(item.getPropertyName(), value);
 					}
+					putMapIntoCachedData(deviceId, mappingValue);
+					return;
 				}
-				putMapIntoCachedData(deviceId, mappingValue);
+			} catch (CommandFailureException ex) {
+				if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+					retryCount++;
+					if (retryCount < maxRetries) {
+						logger.info("Too many requests, retrying... Attempt " + retryCount);
+						try {
+							Thread.sleep(waitTime);
+						} catch (InterruptedException ie) {
+							Thread.currentThread().interrupt();
+							break;
+						}
+						waitTime *= 2;
+					} else {
+						logger.info("Max retries reached. Skipping info request for device: " + deviceId);
+						break;
+					}
+				} else {
+					logger.error(String.format("Error when retrieving device info by id %s", deviceId), ex);
+					break;
+				}
+			} catch (Exception e) {
+				logger.error(String.format("Error when retrieving device info by id %s", deviceId), e);
+				break;
 			}
-		} catch (Exception e) {
-			logger.error(String.format("Error when retrieve device info by id %s", deviceId), e);
 		}
 	}
 
@@ -1036,21 +1097,49 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device to retrieve settings for.
 	 */
 	private void retrieveDeviceSettings(String deviceId) {
-		try {
-			JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
-			if (response != null) {
-				Map<String, String> mappingValue = new HashMap<>();
-				for (DeviceSettings item : DeviceSettings.values()) {
-					String value = NeatPulseConstant.EMPTY;
-					if (response.has(item.getValue())) {
-						value = response.get(item.getValue()).asText();
+		int maxRetries = 3;
+		int retryCount = 0;
+		long waitTime = 500;
+
+		while (retryCount < maxRetries) {
+			try {
+				JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+				if (response != null) {
+					Map<String, String> mappingValue = new HashMap<>();
+					for (DeviceSettings item : DeviceSettings.values()) {
+						String value = NeatPulseConstant.EMPTY;
+						if (response.has(item.getValue())) {
+							value = response.get(item.getValue()).asText();
+						}
+						mappingValue.put(item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName(), value);
 					}
-					mappingValue.put(item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName(), value);
+					putMapIntoCachedData(deviceId, mappingValue);
+					return;
 				}
-				putMapIntoCachedData(deviceId, mappingValue);
+			} catch (CommandFailureException ex) {
+				if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+					retryCount++;
+					if (retryCount < maxRetries) {
+						logger.info("Too many requests, retrying... Attempt " + retryCount);
+						try {
+							Thread.sleep(waitTime);
+						} catch (InterruptedException ie) {
+							Thread.currentThread().interrupt();
+							break;
+						}
+						waitTime *= 2;
+					} else {
+						logger.info("Max retries reached. Skipping settings request for device: " + deviceId);
+						break;
+					}
+				} else {
+					logger.error(String.format("Error when retrieving device settings by id %s", deviceId), ex);
+					break;
+				}
+			} catch (Exception e) {
+				logger.error(String.format("Error when retrieving device settings by id %s", deviceId), e);
+				break;
 			}
-		} catch (Exception e) {
-			logger.error(String.format("Error when retrieve device settings by id %s", deviceId), e);
 		}
 	}
 
@@ -1088,7 +1177,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				String inCallStatus = getDefaultValueForNullData(cachedData.get(DeviceInfo.IN_CALL_STATUS.getPropertyName()));
 				//InCallStatus: NONE, ZOOM, TEAMS
 				setInCall(aggregatedDevice, !NeatPulseConstant.NONE.equalsIgnoreCase(inCallStatus));
-				populateMonitorProperties(cachedData, stats, advancedControllableProperties, modelCode, aggregatedDevice.getDeviceId());
+				populateMonitorProperties(cachedData, stats, dynamicStats, advancedControllableProperties, modelCode, aggregatedDevice.getDeviceId());
 				if (!NeatPulseModel.NEAT_PAD.getValue().equalsIgnoreCase(modelCode) && !NeatPulseModel.NEAT_CENTER.getValue().equalsIgnoreCase(modelCode)) {
 					populateRoomSensor(aggregatedDevice.getDeviceId(), stats, dynamicStats);
 				}
@@ -1151,23 +1240,27 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * Populates monitor properties including device info, device sensor, device settings, and advanced controllable properties.
+	 * Populates various monitoring properties related to the device, including device information,
+	 * sensor data, and device settings.
 	 *
-	 * @param cached The cached data containing device information.
-	 * @param stats The map to store monitor properties.
-	 * @param advancedControllableProperties The list to store advanced controllable properties.
-	 * @param modelCode is code name of sensor device
+	 * @param cached A map containing cached device data.
+	 * @param stats A map storing general device statistics.
+	 * @param dynamicStats A map holding dynamic statistics, typically real-time or frequently updated data.
+	 * @param advancedControllableProperties A list of advanced controllable properties used for device interaction.
+	 * @param modelCode The model code of the device.
+	 * @param deviceId The unique identifier of the device.
 	 */
-	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, List<AdvancedControllableProperty> advancedControllableProperties,
+	private void populateMonitorProperties(Map<String, String> cached, Map<String, String> stats, Map<String, String> dynamicStats, List<AdvancedControllableProperty> advancedControllableProperties,
 			String modelCode, String deviceId) {
 		populateDeviceInfo(cached, stats);
-		populateDeviceSensor(stats, modelCode, deviceId);
+		populateDeviceSensor(stats, dynamicStats, modelCode, deviceId);
 		populateDeviceSettings(cached, stats, advancedControllableProperties);
 	}
 
 	/**
 	 * Populates monitor properties including room sensor data,
 	 *
+	 * @param deviceId The id of device
 	 * @param stats The map to store monitor properties.
 	 * @param dynamicStats The map to store historical properties.
 	 */
@@ -1217,9 +1310,14 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
-	 * populate historical properties if config
+	 * Categorizes and stores sensor properties in either `stats` or `dynamicStats`
+	 * based on historical properties.
 	 *
-	 * @param sensor the
+	 * @param stats        Map for standard sensor properties.
+	 * @param dynamicStats Map for historical sensor properties.
+	 * @param sensor       The sensor being evaluated.
+	 * @param value        The property value.
+	 * @param name         The key for storing the property.
 	 */
 	private void populateHistoricalProperties(Map<String, String> stats, Map<String, String> dynamicStats, DeviceSensor sensor, String value, String name) {
 		boolean propertyListed = false;
@@ -1259,7 +1357,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 							stats.put(propertyName, value);
 							updateAvailable = NeatPulseConstant.TRUE;
 						}
-						stats.put("FirmwareUpdateAvailable", updateAvailable);
+						stats.put("FirmwareUpdateAvailable", uppercaseFirstCharacter(updateAvailable));
 					}
 					break;
 				case PRIMARY_MODE:
@@ -1272,19 +1370,22 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					stats.put(propertyName, EnumTypeHandler.getValueByName(CallStatusEnum.class, value));
 					break;
 				default:
-					stats.put(propertyName, value);
+					stats.put(propertyName, uppercaseFirstCharacter(value));
 					break;
 			}
 		}
 	}
 
 	/**
-	 * Populates device sensor information into the specified {@code stats} map based on the cached data.
-	 * This method parses the JSON data from the cached device sensor information and extracts relevant sensor properties.
+	 * Populates sensor data for a given device by retrieving sensor information from the stored device sensor map.
+	 * It categorizes sensor data based on the supported sensors of the device model and formats the values accordingly.
 	 *
-	 * @param stats The map to populate with the extracted sensor information.
+	 * @param stats A map containing general device statistics, where sensor data will be stored.
+	 * @param dynamicStats A map holding real-time or frequently updated sensor values.
+	 * @param modelCode The model code of the device, used to determine supported sensors.
+	 * @param deviceId The unique identifier of the device, used to fetch sensor data.
 	 */
-	private void populateDeviceSensor(Map<String, String> stats, String modelCode, String deviceId) {
+	private void populateDeviceSensor(Map<String, String> stats, Map<String, String> dynamicStats, String modelCode, String deviceId) {
 		try {
 			JsonNode sensorJson = mapOfDeviceIdAndDeviceSensor.get(deviceId);
 			if (sensorJson != null && sensorJson.isArray()) {
@@ -1297,12 +1398,21 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					}
 
 					DeviceModel model = DeviceModel.getByDefaultName(modelCode);
+					if (model == null) {
+						continue;
+					}
 					for (DeviceSensor sensor : model.getSupportedSensors()) {
 						if (node.has(sensor.getValue())) {
 							String name = group + sensor.getPropertyName();
 							String value = getDefaultValueForNullData(node.get(sensor.getValue()).asText());
 							switch (sensor) {
 								case TEMPERATURE:
+									if (NeatPulseModel.NEAT_PAD.getValue().equalsIgnoreCase(modelCode)) {
+										populateHistoricalProperties(stats, dynamicStats, sensor, roundDoubleValue(value), name);
+									} else {
+										stats.put(name, roundDoubleValue(value));
+									}
+									break;
 								case HUMIDITY:
 								case ILLUMINATION:
 									stats.put(name, roundDoubleValue(value));
@@ -1343,7 +1453,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			String value = getDefaultValueForNullData(cached.get(propertyName));
 			switch (item) {
 				case REBOOT:
-					addAdvancedControlProperties(advancedControllableProperties, stats, createButton("Reboot", "Apply", "Applying", 0), NeatPulseConstant.NONE);
+					addAdvancedControlProperties(advancedControllableProperties, stats, createButton("Reboot", "Reboot", "Rebooting", 150000), "N/A");
 					break;
 				case SCREEN_BRIGHTNESS:
 					if (NeatPulseConstant.NONE.equals(value)) {
@@ -1590,8 +1700,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private void updateCacheValue(String deviceId, String name, String value) {
 		cachedMonitoringDevice.computeIfAbsent(deviceId, k -> new HashMap<>()).put(name, value);
 		String roomName = cachedMonitoringDevice.get(deviceId).get(DeviceInfo.ROOM_NAME.getPropertyName());
-		for (String id : deviceList.values()) {
-			if (roomName.equals(cachedMonitoringDevice.get(id).get(DeviceInfo.ROOM_NAME.getPropertyName()))) {
+		for (String id : deviceList.keySet()) {
+			if (cachedMonitoringDevice.get(id) != null && roomName.equals(cachedMonitoringDevice.get(id).get(DeviceInfo.ROOM_NAME.getPropertyName()))) {
 				cachedMonitoringDevice.computeIfAbsent(id, k -> new HashMap<>()).put(name, value);
 			}
 		}
