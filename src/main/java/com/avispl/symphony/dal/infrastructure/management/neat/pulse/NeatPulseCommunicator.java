@@ -1357,8 +1357,11 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 							stats.put(propertyName, value);
 							updateAvailable = NeatPulseConstant.TRUE;
 						}
-						stats.put("FirmwareUpdateAvailable", uppercaseFirstCharacter(updateAvailable));
+						stats.put("FirmwareUpdateAvailable", updateAvailable);
 					}
+					break;
+				case CONNECTED:
+					stats.put(propertyName, value);
 					break;
 				case PRIMARY_MODE:
 					stats.put(propertyName, EnumTypeHandler.getValueByName(PrimaryModeEnum.class, value));
