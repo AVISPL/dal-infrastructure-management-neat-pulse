@@ -235,7 +235,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void retrieveDeviceSensorInformation() {
 		try {
-			JsonNode response = this.doGet(String.format(NeatPulseCommand.LIST_DEVICE_SENSOR, this.getLogin()), JsonNode.class);
+			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.LIST_DEVICE_SENSOR, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.DATA)) {
 				JsonNode dataArray = response.get(NeatPulseConstant.DATA);
 				mapOfDeviceIdAndDeviceSensor.clear();
@@ -276,7 +276,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 
 			while (retryCount < maxRetries) {
 				try {
-					JsonNode response = this.doGet(String.format(NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
+					JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
 					if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
 						JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
 						if (dataNode != null && dataNode.has("data")) {
@@ -493,6 +493,31 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		Arrays.asList(historicalProperties.split(",")).forEach(propertyName -> {
 			this.historicalProperties.add(propertyName.trim());
 		});
+	}
+
+	/**
+	 *
+	 */
+	private String baseUri = "";
+
+	/**
+	 * Retrieves {@link #baseUri}
+	 *
+	 * @return value of {@link #baseUri}
+	 */
+	@Override
+	public String getBaseUri() {
+		return baseUri;
+	}
+
+	/**
+	 * Sets {@link #baseUri} value
+	 *
+	 * @param baseUri new value of {@link #baseUri}
+	 */
+	@Override
+	public void setBaseUri(String baseUri) {
+		this.baseUri = baseUri;
 	}
 
 	/**
@@ -861,7 +886,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void sendCommandToControlDevice(String deviceId, String name, String fieldName, Object value) {
 		try {
-			String command = String.format(NeatPulseCommand.CONTROL_DEVICE, this.getLogin(), deviceId);
+			String command = String.format(baseUri + "/" + NeatPulseCommand.CONTROL_DEVICE, this.getLogin(), deviceId);
 			Map<String, Object> bodyJson = new HashMap<>();
 			bodyJson.put(fieldName, value);
 			JsonNode response = this.doPost(command, bodyJson, JsonNode.class);
@@ -885,7 +910,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void controlRebootDevice(String deviceId) {
 		try {
-			String command = String.format(NeatPulseCommand.REBOOT_DEVICE, this.getLogin(), deviceId);
+			String command = String.format(baseUri + "/" + NeatPulseCommand.REBOOT_DEVICE, this.getLogin(), deviceId);
 			Map<String, String> data = new HashMap<>();
 			JsonNode response = this.doPost(command, data, JsonNode.class);
 			if (response == null) {
@@ -908,7 +933,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void retrieveSystemInfo() throws Exception {
 		try {
-			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
+			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ENDPOINTS) && response.get(NeatPulseConstant.ENDPOINTS).isArray()) {
 				deviceList.clear();
 				JsonNode jsonNode = response.get(NeatPulseConstant.ENDPOINTS);
@@ -938,7 +963,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private void retrieveRoomInfo() {
 		try {
 			countRoom = 0;
-			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
+			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ROOMS) && response.get(NeatPulseConstant.ROOMS).isArray()) {
 				mapOfRoomIdAndRoomName.clear();
 				countRoom = response.get(NeatPulseConstant.ROOMS).size();
@@ -1048,7 +1073,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 
 		while (retryCount < maxRetries) {
 			try {
-				JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+				JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
 				if (response != null) {
 					Map<String, String> mappingValue = new HashMap<>();
 					for (DeviceInfo item : DeviceInfo.values()) {
@@ -1103,7 +1128,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 
 		while (retryCount < maxRetries) {
 			try {
-				JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+				JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
 				if (response != null) {
 					Map<String, String> mappingValue = new HashMap<>();
 					for (DeviceSettings item : DeviceSettings.values()) {
