@@ -56,6 +56,7 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetAggregatorData() throws Exception {
+		neatPulseCommunicator.setDevicePollingInterval(1);
 		extendedStatistic = (ExtendedStatistics) neatPulseCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> statistics = extendedStatistic.getStatistics();
 		Assert.assertEquals(3, statistics.size());
@@ -78,11 +79,11 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetMultipleStatisticsWithTimeOfPollingCycle() throws Exception {
-		neatPulseCommunicator.setDevicePollingInterval(2);
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
-		Thread.sleep(30000);
+		Thread.sleep(360000);
 		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
+		Thread.sleep(360000);
 		Assert.assertEquals(11, aggregatedDeviceList.size());
 	}
 
@@ -91,12 +92,12 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetMultipleStatistics() throws Exception {
-		neatPulseCommunicator.setDevicePollingInterval(12);
+		neatPulseCommunicator.setFilterByPulseRoomName("Symphony Lab, CHI-PSG-LAB-CENTER");
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
 		Thread.sleep(30000);
 		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
-		Assert.assertEquals(47, aggregatedDeviceList.size());
+		Assert.assertEquals(19, aggregatedDeviceList.size());
 	}
 
 	/**
@@ -169,19 +170,19 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testAppearanceControl() throws Exception {
+		neatPulseCommunicator.setDevicePollingInterval(10);
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
-		Thread.sleep(20000);
+		Thread.sleep(30000);
 		neatPulseCommunicator.retrieveMultipleStatistics();
 		ControllableProperty controllableProperty = new ControllableProperty();
 		String property = "Display#Appearance";
-		String value = "1";
+		String value = "0";
 		String deviceId = "58fdaf7d-beb6-4d5c-ad35-aa28e84e4358";
 		controllableProperty.setProperty(property);
 		controllableProperty.setValue(value);
 		controllableProperty.setDeviceId(deviceId);
 		neatPulseCommunicator.controlProperty(controllableProperty);
-
 		List<AggregatedDevice> aggregatedDeviceList = neatPulseCommunicator.retrieveMultipleStatistics();
 		Optional<AdvancedControllableProperty> advancedControllableProperty = aggregatedDeviceList.get(1).getControllableProperties().stream().filter(item ->
 				property.equals(item.getName())).findFirst();

@@ -21,10 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
@@ -194,7 +191,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					logger.debug("Fetching other than aggregated device list");
 				}
 				long currentTimestamp = System.currentTimeMillis();
-				if (!flag && nextDevicesCollectionIterationTimestamp <= currentTimestamp) {
+				if (!flag && nextDevicesCollectionIterationTimestamp <= currentTimestamp + 1000) {
 					populateDeviceDetails();
 					flag = true;
 				}
@@ -212,6 +209,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				}
 				if (flag) {
 					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
+					updateValidRetrieveStatisticsTimestamp();
 					flag = false;
 				}
 
@@ -263,56 +261,20 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param id is id of device
 	 */
-	private void retrieveRoomSensorInformation(String id) {
+	private void retrieveRoomSensorInformation(String id) throws Exception {
 		synchronized (deviceList) {
 			String roomId = deviceList.get(id);
 			if (StringUtils.isNullOrEmpty(roomId) || mapRoomIdAndDeviceSensor.containsKey(roomId)) {
 				return;
 			}
-
-			int maxRetries = 3;
-			int retryCount = 0;
-			long waitTime = 500;
-
-			while (retryCount < maxRetries) {
-				try {
-					JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
-					if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
-						JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
-						if (dataNode != null && dataNode.has("data")) {
-							JsonNode sensorData = dataNode.get("data");
-							mapRoomIdAndDeviceSensor.put(roomId, sensorData);
-							return;
-						}
-					}
-				} catch (CommandFailureException ex) {
-					if (ex.getStatusCode() == HttpStatus.NOT_FOUND.value()) {
-						logger.warn("Device not support the room sensor command");
-						break;
-					} else if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
-						retryCount++;
-						if (retryCount < maxRetries) {
-							logger.info("Too many requests, retrying... Attempt " + retryCount);
-							try {
-								Thread.sleep(waitTime);
-							} catch (InterruptedException ie) {
-								Thread.currentThread().interrupt();
-								break;
-							}
-							waitTime *= 2;
-						} else {
-							logger.info("Max retries reached. Skipping request for room sensor: " + id);
-							break;
-						}
-					} else {
-						logger.error("Error when retrieving room sensor information", ex);
-						break;
-					}
-				} catch (Exception e) {
-					logger.error("Error when retrieving room sensor information", e);
-					break;
-				}
-			}
+            JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
+            if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
+                JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
+                if (dataNode != null && dataNode.has("data")) {
+                    JsonNode sensorData = dataNode.get("data");
+                    mapRoomIdAndDeviceSensor.put(roomId, sensorData);
+                }
+            }
 		}
 	}
 
@@ -337,14 +299,14 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * This parameter holds timestamp of when we need to stop performing API calls
 	 * It used when device stop retrieving statistic. Updated each time of called #retrieveMultipleStatistics
 	 */
-	private volatile long validRetrieveStatisticsTimestamp;
+	private volatile long validRetrieveStatisticsTimestamp = 0;
 
 	/**
 	 * Aggregator inactivity timeout. If the {@link NeatPulseCommunicator#retrieveMultipleStatistics()}  method is not
 	 * called during this period of time - device is considered to be paused, thus the Cloud API
 	 * is not supposed to be called
 	 */
-	private static final long retrieveStatisticsTimeOut = 3 * 60 * 1000;
+	private static final long retrieveStatisticsTimeOut = 8 * 60 * 1000;
 
 	/**
 	 * Update the status of the device.
@@ -405,7 +367,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	/**
 	 * list of all devices
 	 */
-	private Map<String, String> deviceList = Collections.synchronizedMap(new HashMap<>());
+	private final Map<String, String> deviceList = Collections.synchronizedMap(new HashMap<>());
 
 	/**
 	 * store device id and list device sensor information
@@ -426,17 +388,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	/**
 	 * number of rooms
 	 */
-	private int countRoom;
+	private int countRoom = 0;
 
 	/**
 	 * time of polling cycle
 	 */
 	private Integer devicePollingInterval;
-
-	/**
-	 * frequently system
-	 */
-	private Integer frequentlySystem = 0;
 
 	/**
 	 * number of threads
@@ -448,26 +405,10 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private Set<String> filterByPulseRoomName = new HashSet<>();
 
-
 	/**
 	 * Configurable property for filter excluding room name
 	 */
 	private Set<String> filterByExcludingPulseRoomName = new HashSet<>();
-
-	/**
-	 * start index
-	 */
-	private Integer startIndex = NeatPulseConstant.START_INDEX;
-
-	/**
-	 * end index
-	 */
-	private Integer endIndex = null;
-
-	/**
-	 * number device in interval
-	 */
-	private Integer numberDeviceInInterval;
 
 	/**
 	 * Configurable property for historical properties, comma separated values kept as set locally
@@ -608,10 +549,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
 	public NeatPulseCommunicator() throws IOException {
-
-		if (devicePollingInterval == null || devicePollingInterval > 15 || devicePollingInterval < 1) {
-			devicePollingInterval = 10;
-		}
 		this.setTrustAllCertificates(true);
 	}
 
@@ -625,18 +562,15 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			if (StringUtils.isNullOrEmpty(this.getLogin())) {
 				throw new ResourceNotReachableException("Please check Organization Id in Username field");
 			}
+			if (devicePollingInterval == null || devicePollingInterval < 5) {
+				devicePollingInterval = 5;
+			}
 			Map<String, String> statistics = new HashMap<>();
 			ExtendedStatistics extendedStatistics = new ExtendedStatistics();
-			if (frequentlySystem == 0) {
-				retrieveSystemInfo();
-				retrieveRoomInfo();
-				retrieveDeviceSensorInformation();
-				filterRoomName();
-			}
-			frequentlySystem++;
-			if (frequentlySystem >= devicePollingInterval / 2) {
-				frequentlySystem = 0;
-			}
+			retrieveSystemInfo();
+			retrieveRoomInfo();
+			retrieveDeviceSensorInformation();
+			filterRoomName();
 			populateSystemInfo(statistics);
 			extendedStatistics.setStatistics(statistics);
 			localExtendedStatistics = extendedStatistics;
@@ -793,8 +727,9 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			executorService = Executors.newFixedThreadPool(1);
 			executorService.submit(deviceDataLoader = new NeatPulseDataLoader());
 		}
-		nextDevicesCollectionIterationTimestamp = System.currentTimeMillis();
-		updateValidRetrieveStatisticsTimestamp();
+		if (validRetrieveStatisticsTimestamp == 0){
+			validRetrieveStatisticsTimestamp = System.currentTimeMillis() + retrieveStatisticsTimeOut;
+		}
 		if (cachedMonitoringDevice.isEmpty()) {
 			return Collections.emptyList();
 		}
@@ -861,12 +796,10 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			localExtendedStatistics.getControllableProperties().clear();
 		}
 		nextDevicesCollectionIterationTimestamp = 0;
+		validRetrieveStatisticsTimestamp = 0;
 		aggregatedDeviceList.clear();
 		cachedMonitoringDevice.clear();
 		deviceList.clear();
-		startIndex = NeatPulseConstant.START_INDEX;
-		endIndex = null;
-		numberDeviceInInterval = null;
 		historicalProperties.clear();
 		filterByExcludingPulseRoomName.clear();
 		filterByPulseRoomName.clear();
@@ -894,8 +827,12 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					.equalsIgnoreCase(response.get(NeatPulseConstant.CONFIG).get(fieldName).asText())) {
 				throw new IllegalArgumentException("The response is incorrect");
 			}
-		} catch (CommandFailureException e) {
-			throw new IllegalArgumentException(String.format("Failed to apply config: attempted to override profile settings: the following fields contain conflicts: [%s]", name));
+		} catch (CommandFailureException ex) {
+			if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+				throw new IllegalArgumentException(String.format("Can't control %s with value is %s. You've exceeded the maximum number of allowed requests. Please try again after a few minutes.", name, value));
+			} else {
+				throw new IllegalArgumentException(String.format("Failed to apply config: attempted to override profile settings: the following fields contain conflicts: [%s]", name));
+			}
 		} catch (Exception e) {
 			throw new IllegalArgumentException(String.format("Can't control %s with value is %s. %s", name, value, e.getMessage()));
 		}
@@ -962,7 +899,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void retrieveRoomInfo() {
 		try {
-			countRoom = 0;
 			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ROOMS) && response.get(NeatPulseConstant.ROOMS).isArray()) {
 				mapOfRoomIdAndRoomName.clear();
@@ -995,19 +931,13 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void populateDeviceDetails() {
 		int numberOfThreads = getDefaultNumberOfThread();
-		numberDeviceInInterval = 1000 * devicePollingInterval / (3 * 60);
 		ExecutorService executorServiceForRetrieveAggregatedData = Executors.newFixedThreadPool(numberOfThreads);
 		List<Future<?>> futures = new ArrayList<>();
 
-		if (endIndex == null) {
-			endIndex = numberDeviceInInterval;
-		}
-		if (endIndex > deviceList.size()) {
-			endIndex = deviceList.size();
-		}
 		synchronized (deviceList) {
+			filterRoomName();
 			List<Map.Entry<String, String>> entries = new ArrayList<>(deviceList.entrySet());
-			for (int i = startIndex; i < endIndex; i++) {
+			for (int i = 0; i < deviceList.size(); i++) {
 				int index = i;
 				Future<?> future = executorServiceForRetrieveAggregatedData.submit(
 						() -> processDeviceId(entries.get(index).getKey())
@@ -1017,13 +947,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		}
 		waitForFutures(futures, executorServiceForRetrieveAggregatedData);
 		executorServiceForRetrieveAggregatedData.shutdown();
-		if (endIndex == deviceList.size()) {
-			startIndex = NeatPulseConstant.START_INDEX;
-			endIndex = numberDeviceInInterval;
-		} else {
-			startIndex = endIndex;
-			endIndex += numberDeviceInInterval;
-		}
 	}
 
 	/**
@@ -1044,18 +967,79 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
+	 * Executes an operation with retry and exponential backoff on HTTP 429 errors.
+	 *
+	 * Stops retrying on 404. Logs and exits on other errors.
+	 *
+	 * @param operation       The operation to execute.
+	 * @param commandName     Name of the command (for logging).
+	 * @param deviceId        ID of the target device.
+	 * @param maxRetries      Maximum number of retry attempts.
+	 * @param initialWaitTime Initial wait time in milliseconds before retrying.
+	 */
+	private void retryWithBackoff(Callable<Void> operation,String commandName, String deviceId , int maxRetries, long initialWaitTime) {
+		int retryCount = 0;
+		long waitTime = initialWaitTime;
+
+		while (retryCount < maxRetries) {
+			try {
+                operation.call();
+				return;
+			} catch (CommandFailureException ex) {
+                if (ex.getStatusCode() == HttpStatus.NOT_FOUND.value()) {
+                    logger.warn(String.format("Device %s not support the room sensor command", deviceId));
+                    break;
+                } else if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+					retryCount++;
+					if (retryCount < 3) {
+						logger.info(String.format("Device %s with %s is Too many requests, retrying... Attempt %s", deviceId, commandName, retryCount));
+						try {
+							Thread.sleep(waitTime);
+						} catch (InterruptedException ie) {
+							logger.error("Thread interrupted during retry", ie);
+							Thread.currentThread().interrupt();
+							return;
+						}
+						waitTime *= 2; // Exponential backoff
+					} else {
+						logger.info(String.format("Max retries reached. Skipping %s request for device: %s", commandName, deviceId));
+						break;
+					}
+				} else {
+					logger.error(String.format("Error when retrieving %s by id %s", commandName, deviceId), ex);
+					break;
+				}
+			} catch (Exception e) {
+				logger.error(String.format("Error when retrieving %s by id %s", commandName, deviceId), e);
+				break;
+			}
+		}
+	}
+
+	/**
 	 * Processes the specified device by retrieving its information, sensor data, and settings.
 	 *
 	 * @param deviceId The ID of the device to be processed.
 	 */
 	private void processDeviceId(String deviceId) {
 		try {
-			retrieveRoomSensorInformation(deviceId);
-            Thread.sleep(500);
-        	retrieveDeviceInfo(deviceId);
-			Thread.sleep(500);
-			retrieveDeviceSettings(deviceId);
-			Thread.sleep(500);
+            retryWithBackoff(() -> {
+                retrieveRoomSensorInformation(deviceId);
+                return null;
+            },"Room Sensor Information", deviceId, 3, 1000L);
+			Thread.sleep(1000);
+
+            retryWithBackoff(() -> {
+                retrieveDeviceInfo(deviceId);
+                return null;
+            },"Device Information", deviceId, 3, 1000L);
+            Thread.sleep(1000);
+
+            retryWithBackoff(() -> {
+                retrieveDeviceSettings(deviceId);
+                return null;
+            },"Device Settings", deviceId, 3, 1000L);
+            Thread.sleep(1000);
 		} catch (InterruptedException e) {
 			logger.error("An exception occurred while processing the device.", e);
 		}
@@ -1066,54 +1050,22 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param deviceId The ID of the device.
 	 */
-	private void retrieveDeviceInfo(String deviceId) {
-		int maxRetries = 3;
-		int retryCount = 0;
-		long waitTime = 500;
-
-		while (retryCount < maxRetries) {
-			try {
-				JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
-				if (response != null) {
-					Map<String, String> mappingValue = new HashMap<>();
-					for (DeviceInfo item : DeviceInfo.values()) {
-						if (!NeatPulseConstant.EMPTY.equals(item.getValue())) {
-							String value = NeatPulseConstant.EMPTY;
-							JsonNode itemValueNode = response.get(item.getValue());
-							if (itemValueNode != null) {
-								value = itemValueNode.isArray() ? itemValueNode.toString() : itemValueNode.asText();
-							}
-							mappingValue.put(item.getPropertyName(), value);
-						}
-					}
-					putMapIntoCachedData(deviceId, mappingValue);
-					return;
-				}
-			} catch (CommandFailureException ex) {
-				if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
-					retryCount++;
-					if (retryCount < maxRetries) {
-						logger.info("Too many requests, retrying... Attempt " + retryCount);
-						try {
-							Thread.sleep(waitTime);
-						} catch (InterruptedException ie) {
-							Thread.currentThread().interrupt();
-							break;
-						}
-						waitTime *= 2;
-					} else {
-						logger.info("Max retries reached. Skipping info request for device: " + deviceId);
-						break;
-					}
-				} else {
-					logger.error(String.format("Error when retrieving device info by id %s", deviceId), ex);
-					break;
-				}
-			} catch (Exception e) {
-				logger.error(String.format("Error when retrieving device info by id %s", deviceId), e);
-				break;
-			}
-		}
+	private void retrieveDeviceInfo(String deviceId) throws Exception {
+        JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+        if (response != null) {
+            Map<String, String> mappingValue = new HashMap<>();
+            for (DeviceInfo item : DeviceInfo.values()) {
+                if (!NeatPulseConstant.EMPTY.equals(item.getValue())) {
+                    String value = NeatPulseConstant.EMPTY;
+                    JsonNode itemValueNode = response.get(item.getValue());
+                    if (itemValueNode != null) {
+                        value = itemValueNode.isArray() ? itemValueNode.toString() : itemValueNode.asText();
+                    }
+                    mappingValue.put(item.getPropertyName(), value);
+                }
+            }
+            putMapIntoCachedData(deviceId, mappingValue);
+        }
 	}
 
 	/**
@@ -1121,51 +1073,19 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 *
 	 * @param deviceId The ID of the device to retrieve settings for.
 	 */
-	private void retrieveDeviceSettings(String deviceId) {
-		int maxRetries = 3;
-		int retryCount = 0;
-		long waitTime = 500;
-
-		while (retryCount < maxRetries) {
-			try {
-				JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
-				if (response != null) {
-					Map<String, String> mappingValue = new HashMap<>();
-					for (DeviceSettings item : DeviceSettings.values()) {
-						String value = NeatPulseConstant.EMPTY;
-						if (response.has(item.getValue())) {
-							value = response.get(item.getValue()).asText();
-						}
-						mappingValue.put(item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName(), value);
-					}
-					putMapIntoCachedData(deviceId, mappingValue);
-					return;
-				}
-			} catch (CommandFailureException ex) {
-				if (ex.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
-					retryCount++;
-					if (retryCount < maxRetries) {
-						logger.info("Too many requests, retrying... Attempt " + retryCount);
-						try {
-							Thread.sleep(waitTime);
-						} catch (InterruptedException ie) {
-							Thread.currentThread().interrupt();
-							break;
-						}
-						waitTime *= 2;
-					} else {
-						logger.info("Max retries reached. Skipping settings request for device: " + deviceId);
-						break;
-					}
-				} else {
-					logger.error(String.format("Error when retrieving device settings by id %s", deviceId), ex);
-					break;
-				}
-			} catch (Exception e) {
-				logger.error(String.format("Error when retrieving device settings by id %s", deviceId), e);
-				break;
-			}
-		}
+	private void retrieveDeviceSettings(String deviceId) throws Exception  {
+        JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+        if (response != null) {
+            Map<String, String> mappingValue = new HashMap<>();
+            for (DeviceSettings item : DeviceSettings.values()) {
+                String value = NeatPulseConstant.EMPTY;
+                if (response.has(item.getValue())) {
+                    value = response.get(item.getValue()).asText();
+                }
+                mappingValue.put(item.getGroup() + NeatPulseConstant.HASH + item.getPropertyName(), value);
+            }
+            putMapIntoCachedData(deviceId, mappingValue);
+        }
 	}
 
 	/**
