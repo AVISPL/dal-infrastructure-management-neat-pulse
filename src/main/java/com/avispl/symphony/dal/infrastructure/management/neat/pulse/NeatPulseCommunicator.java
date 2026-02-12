@@ -163,7 +163,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	class NeatPulseDataLoader implements Runnable {
 		private volatile boolean inProgress;
-		private volatile boolean flag = false;
 
 		public NeatPulseDataLoader() {
 			inProgress = true;
@@ -189,16 +188,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					continue loop;
 				}
 
-				long startCycle = System.currentTimeMillis();
-				if (logger.isDebugEnabled()) {
-					logger.debug("Fetching other than aggregated device list");
-				}
-				long currentTimestamp = System.currentTimeMillis();
-				if (!flag && nextDevicesCollectionIterationTimestamp <= currentTimestamp + 1000) {
-					populateDeviceDetails();
-					flag = true;
-				}
-
 				while (nextDevicesCollectionIterationTimestamp > System.currentTimeMillis()) {
 					try {
 						TimeUnit.MILLISECONDS.sleep(1000);
@@ -210,18 +199,28 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				if (!inProgress) {
 					break loop;
 				}
-				if (flag) {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
-					lastMonitoringCycleDuration =  Math.max((System.currentTimeMillis() - startCycle) / 1000, 1L);
+
+				long startCycle = System.currentTimeMillis();
+				if (logger.isDebugEnabled()) {
+					logger.debug("Fetching other than aggregated device list");
+				}
+
+				try {
+					if (logger.isDebugEnabled()) {
+						logger.debug("Fetching devices details");
+					}
+						populateDeviceDetails();
+				} catch (Exception e) {
+					logger.error("Error occurred during device list retrieval: " + e.getMessage(), e);
+				}
+
+				nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
+				lastMonitoringCycleDuration =  Math.max((System.currentTimeMillis() - startCycle) / 1000, 1L);
+				if (logger.isDebugEnabled()) {
 					logger.debug("Finished collecting devices statistics cycle at " + new Date() + ", total duration: " + lastMonitoringCycleDuration);
+				}
 
 					updateValidRetrieveStatisticsTimestamp();
-					flag = false;
-				}
-
-				if (logger.isDebugEnabled()) {
-					logger.debug("Finished collecting devices statistics cycle at " + new Date());
-				}
 			}
 			// Finished collecting
 		}
