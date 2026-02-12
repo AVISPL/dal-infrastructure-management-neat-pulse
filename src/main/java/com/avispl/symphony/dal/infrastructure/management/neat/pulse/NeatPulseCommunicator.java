@@ -163,6 +163,11 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	class NeatPulseDataLoader implements Runnable {
 		private volatile boolean inProgress;
+		/**
+		 * Current monitoring cycle interval - amount of time that passes between 2 consecutive getMultipleStatistics calls
+		 * 60000ms by default
+		 * */
+		private final long systemMonitoringCycleInterval = 60000L;
 
 		public NeatPulseDataLoader() {
 			inProgress = true;
@@ -214,7 +219,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 					logger.error("Error occurred during device list retrieval: " + e.getMessage(), e);
 				}
 
-				nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
+				nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + (getMonitoringRate() * systemMonitoringCycleInterval);
 				lastMonitoringCycleDuration =  Math.max((System.currentTimeMillis() - startCycle) / 1000, 1L);
 				if (logger.isDebugEnabled()) {
 					logger.debug("Finished collecting devices statistics cycle at " + new Date() + ", total duration: " + lastMonitoringCycleDuration);
@@ -971,7 +976,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void populateSystemInfo(Map<String, String> stats) {
 		stats.put("NumberOfPulseRooms", String.valueOf(countRoom));
-		stats.put("DevicePollingInterval(minutes)", String.valueOf(devicePollingInterval));
+		stats.put("DevicePollingInterval(min)", String.valueOf(devicePollingInterval));
 	}
 
 	/**
