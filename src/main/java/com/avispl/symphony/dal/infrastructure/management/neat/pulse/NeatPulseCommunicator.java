@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.*;
@@ -162,7 +163,11 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	class NeatPulseDataLoader implements Runnable {
 		private volatile boolean inProgress;
-		private volatile boolean flag = false;
+		/**
+		 * Current monitoring cycle interval - amount of time that passes between 2 consecutive getMultipleStatistics calls
+		 * 60000ms by default
+		 * */
+		private final long systemMonitoringCycleInterval = 60000L;
 
 		public NeatPulseDataLoader() {
 			inProgress = true;
@@ -187,14 +192,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				if (devicePaused) {
 					continue loop;
 				}
-				if (logger.isDebugEnabled()) {
-					logger.debug("Fetching other than aggregated device list");
-				}
-				long currentTimestamp = System.currentTimeMillis();
-				if (!flag && nextDevicesCollectionIterationTimestamp <= currentTimestamp + 1000) {
-					populateDeviceDetails();
-					flag = true;
-				}
 
 				while (nextDevicesCollectionIterationTimestamp > System.currentTimeMillis()) {
 					try {
@@ -207,15 +204,28 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				if (!inProgress) {
 					break loop;
 				}
-				if (flag) {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
-					updateValidRetrieveStatisticsTimestamp();
-					flag = false;
+
+				long startCycle = System.currentTimeMillis();
+				if (logger.isDebugEnabled()) {
+					logger.debug("Fetching other than aggregated device list");
 				}
 
-				if (logger.isDebugEnabled()) {
-					logger.debug("Finished collecting devices statistics cycle at " + new Date());
+				try {
+					if (logger.isDebugEnabled()) {
+						logger.debug("Fetching devices details");
+					}
+						populateDeviceDetails();
+				} catch (Exception e) {
+					logger.error("Error occurred during device list retrieval: " + e.getMessage(), e);
 				}
+
+				nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + (getMonitoringRate() * systemMonitoringCycleInterval);
+				lastMonitoringCycleDuration =  Math.max((System.currentTimeMillis() - startCycle) / 1000, 1L);
+				if (logger.isDebugEnabled()) {
+					logger.debug("Finished collecting devices statistics cycle at " + new Date() + ", total duration: " + lastMonitoringCycleDuration);
+				}
+
+					updateValidRetrieveStatisticsTimestamp();
 			}
 			// Finished collecting
 		}
@@ -294,6 +304,21 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * is set to currentTime + 30s, at the same time, calling {@link #retrieveMultipleStatistics()} and updating the
 	 */
 	private long nextDevicesCollectionIterationTimestamp;
+
+	/**
+	 * How much time last monitoring cycle took to finish
+	 */
+	private long lastMonitoringCycleDuration;
+
+	/**
+	 * Adapter metadata properties - adapter version and build date
+	 */
+	private Properties adapterProperties;
+
+	/**
+	 * Device adapter instantiation timestamp.
+	 */
+	private long adapterInitializationTimestamp;
 
 	/**
 	 * This parameter holds timestamp of when we need to stop performing API calls
@@ -549,6 +574,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
 	public NeatPulseCommunicator() throws IOException {
+		adapterProperties = new Properties();
+		adapterProperties.load(getClass().getResourceAsStream("/version.properties"));
 		this.setTrustAllCertificates(true);
 	}
 
@@ -566,13 +593,16 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				devicePollingInterval = 5;
 			}
 			Map<String, String> statistics = new HashMap<>();
+			Map<String, String> dynamicStatistics = new HashMap<>();
 			ExtendedStatistics extendedStatistics = new ExtendedStatistics();
+			retrieveMetadata(statistics, dynamicStatistics);
 			retrieveSystemInfo();
 			retrieveRoomInfo();
 			retrieveDeviceSensorInformation();
 			filterRoomName();
 			populateSystemInfo(statistics);
 			extendedStatistics.setStatistics(statistics);
+			extendedStatistics.setDynamicStatistics(dynamicStatistics);
 			localExtendedStatistics = extendedStatistics;
 		} finally {
 			reentrantLock.unlock();
@@ -770,6 +800,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		if (logger.isDebugEnabled()) {
 			logger.debug("Internal init is called.");
 		}
+		adapterInitializationTimestamp = System.currentTimeMillis();
 		executorService = Executors.newFixedThreadPool(1);
 		executorService.submit(deviceDataLoader = new NeatPulseDataLoader());
 		super.internalInit();
@@ -807,6 +838,30 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		mapOfRoomIdAndRoomName.clear();
 		mapOfDeviceIdAndDeviceSensor.clear();
 		super.internalDestroy();
+	}
+
+	/**
+	 * Retrieves metadata information and updates the provided statistics and dynamic map.
+	 *
+	 * @param stats the map where statistics will be stored
+	 * @param dynamicStatistics the map where dynamic statistics will be stored
+	 */
+	private void retrieveMetadata(Map<String, String> stats, Map<String, String> dynamicStatistics) {
+		try {
+			dynamicStatistics.put(NeatPulseConstant.MONITORING_CYCLE_DURATION, String.valueOf(lastMonitoringCycleDuration));
+			stats.put(NeatPulseConstant.ADAPTER_VERSION,
+					getDefaultValueForNullData(adapterProperties.getProperty("aggregator.version")));
+			stats.put(NeatPulseConstant.ADAPTER_BUILD_DATE,
+					getDefaultValueForNullData(adapterProperties.getProperty("aggregator.build.date")));
+			long adapterUptime = System.currentTimeMillis() - adapterInitializationTimestamp;
+
+			stats.put(NeatPulseConstant.ADAPTER_UPTIME_MIN, String.valueOf(adapterUptime / (1000 * 60)));
+			stats.put(NeatPulseConstant.ADAPTER_UPTIME, normalizeUptime(adapterUptime / 1000));
+			stats.put(NeatPulseConstant.SYSTEM_MONITORING_CYCLE, String.valueOf(getMonitoringRate()));
+			dynamicStatistics.put(NeatPulseConstant.MONITORED_DEVICES_TOTAL, String.valueOf(deviceList.size()));
+		} catch (Exception e) {
+			logger.error("Failed to populate metadata information", e);
+		}
 	}
 
 	/**
@@ -920,9 +975,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param stats The map to populate with system information.
 	 */
 	private void populateSystemInfo(Map<String, String> stats) {
-		stats.put("NumberOfDevices", String.valueOf(deviceList.size()));
 		stats.put("NumberOfPulseRooms", String.valueOf(countRoom));
-		stats.put("DevicePollingInterval(minutes)", String.valueOf(devicePollingInterval));
+		stats.put("DevicePollingInterval(min)", String.valueOf(devicePollingInterval));
 	}
 
 	/**
@@ -1756,5 +1810,37 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 
 			advancedControllableProperties.add(property);
 		}
+	}
+
+	/**
+	 * Uptime is received in seconds, need to normalize it and make it human-readable, like
+	 * 1 day 5 hour 12 minute 55 minute
+	 * Incoming parameter is may have a decimal point, so in order to safely process this - it's rounded first.
+	 * We don't need to add a segment of time if it's 0.
+	 *
+	 * @param uptimeSeconds value in seconds
+	 * @return string value of format 'x d x hr x min x sec'
+	 */
+	public static String normalizeUptime(long uptimeSeconds) {
+		StringBuilder normalizedUptime = new StringBuilder();
+
+		long seconds = uptimeSeconds % 60;
+		long minutes = uptimeSeconds % 3600 / 60;
+		long hours = uptimeSeconds % 86400 / 3600;
+		long days = uptimeSeconds / 86400;
+
+		if (days > 0) {
+			normalizedUptime.append(days).append(" d ");
+		}
+		if (hours > 0) {
+			normalizedUptime.append(hours).append(" hr ");
+		}
+		if (minutes > 0) {
+			normalizedUptime.append(minutes).append(" min ");
+		}
+		if (seconds > 0) {
+			normalizedUptime.append(seconds).append(" sec");
+		}
+		return normalizedUptime.toString().trim();
 	}
 }
