@@ -416,11 +416,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private int countRoom = 0;
 
 	/**
-	 * time of polling cycle
-	 */
-	private Integer devicePollingInterval;
-
-	/**
 	 * number of threads
 	 */
 	private Integer numberThreads;
@@ -484,24 +479,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	@Override
 	public void setBaseUri(String baseUri) {
 		this.baseUri = baseUri;
-	}
-
-	/**
-	 * Retrieves {@link #devicePollingInterval}
-	 *
-	 * @return value of {@link #devicePollingInterval}
-	 */
-	public Integer getDevicePollingInterval() {
-		return devicePollingInterval;
-	}
-
-	/**
-	 * Sets {@link #devicePollingInterval} value
-	 *
-	 * @param devicePollingInterval new value of {@link #devicePollingInterval}
-	 */
-	public void setDevicePollingInterval(Integer devicePollingInterval) {
-		this.devicePollingInterval = devicePollingInterval;
 	}
 
 	/**
@@ -588,9 +565,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		try {
 			if (StringUtils.isNullOrEmpty(this.getLogin())) {
 				throw new ResourceNotReachableException("Please check Organization Id in Username field");
-			}
-			if (devicePollingInterval == null || devicePollingInterval < 5) {
-				devicePollingInterval = 5;
 			}
 			Map<String, String> statistics = new HashMap<>();
 			Map<String, String> dynamicStatistics = new HashMap<>();
@@ -976,7 +950,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void populateSystemInfo(Map<String, String> stats) {
 		stats.put("NumberOfPulseRooms", String.valueOf(countRoom));
-		stats.put("DevicePollingInterval(min)", String.valueOf(devicePollingInterval));
 	}
 
 	/**
