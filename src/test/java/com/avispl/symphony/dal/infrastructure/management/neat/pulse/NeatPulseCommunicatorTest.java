@@ -56,7 +56,6 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetAggregatorData() throws Exception {
-		neatPulseCommunicator.setDevicePollingInterval(1);
 		extendedStatistic = (ExtendedStatistics) neatPulseCommunicator.getMultipleStatistics().get(0);
 		Map<String, String> statistics = extendedStatistic.getStatistics();
 		Assert.assertEquals(3, statistics.size());
@@ -71,7 +70,6 @@ public class NeatPulseCommunicatorTest {
 		Map<String, String> statistics = extendedStatistic.getStatistics();
 		Assert.assertEquals("47", statistics.get("NumberOfDevices"));
 		Assert.assertEquals("34", statistics.get("NumberOfPulseRooms"));
-		Assert.assertEquals("10", statistics.get("DevicePollingInterval(minutes)"));
 	}
 
 	/**
@@ -105,7 +103,6 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testGetMultipleStatisticsWithHistoricalProperties() throws Exception {
-		neatPulseCommunicator.setDevicePollingInterval(2);
 		neatPulseCommunicator.setHistoricalProperties("Temperature(C)");
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
@@ -170,7 +167,6 @@ public class NeatPulseCommunicatorTest {
 	 */
 	@Test
 	void testAppearanceControl() throws Exception {
-		neatPulseCommunicator.setDevicePollingInterval(10);
 		neatPulseCommunicator.getMultipleStatistics();
 		neatPulseCommunicator.retrieveMultipleStatistics();
 		Thread.sleep(30000);
