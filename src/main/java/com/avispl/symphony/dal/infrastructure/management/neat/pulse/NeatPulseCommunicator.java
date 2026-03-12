@@ -19,9 +19,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TimeZone;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
@@ -162,7 +167,11 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	class NeatPulseDataLoader implements Runnable {
 		private volatile boolean inProgress;
-		private volatile boolean flag = false;
+		/**
+		 * Current monitoring cycle interval - amount of time that passes between two consecutive {@code getMultipleStatistics} calls.
+		 * 5 minutes (300000 ms) by default, which is the minimum allowed interval due to rate limiting constraints.
+		 */
+		private final long systemMonitoringCycleInterval = TimeUnit.MINUTES.toMillis(5);
 
 		public NeatPulseDataLoader() {
 			inProgress = true;
@@ -187,35 +196,46 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				if (devicePaused) {
 					continue loop;
 				}
-				if (logger.isDebugEnabled()) {
-					logger.debug("Fetching other than aggregated device list");
-				}
-				long currentTimestamp = System.currentTimeMillis();
-				if (!flag && nextDevicesCollectionIterationTimestamp <= currentTimestamp + 1000) {
-					populateDeviceDetails();
-					flag = true;
-				}
 
 				while (nextDevicesCollectionIterationTimestamp > System.currentTimeMillis()) {
 					try {
 						TimeUnit.MILLISECONDS.sleep(1000);
 					} catch (InterruptedException e) {
-						logger.info("Ignore for now");
+						logger.info("Interrupted exception during polling cycle operation.");
 					}
 				}
 
 				if (!inProgress) {
 					break loop;
 				}
-				if (flag) {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + 60000L * devicePollingInterval;
-					updateValidRetrieveStatisticsTimestamp();
-					flag = false;
+
+				long startCycle = System.currentTimeMillis();
+				if (logger.isDebugEnabled()) {
+					logger.debug("Fetching other than aggregated device list");
 				}
 
-				if (logger.isDebugEnabled()) {
-					logger.debug("Finished collecting devices statistics cycle at " + new Date());
+				try {
+					if (logger.isDebugEnabled()) {
+						logger.debug("Fetching devices details");
+					}
+					populateDeviceDetails();
+				} catch (Exception e) {
+					logger.error("Error occurred during device list retrieval: " + e.getMessage(), e);
 				}
+
+				try {
+					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + systemMonitoringCycleInterval
+							+ (getMonitoringRate() - 1) * TimeUnit.SECONDS.toMillis(150);
+				} catch (NoSuchMethodError nsme) {
+					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + systemMonitoringCycleInterval;
+					logger.warn("Unsupported feature: getMonitoringRate isn't available on current Cloud Connector version.", nsme);
+				}
+				lastMonitoringCycleDuration =  Math.max((System.currentTimeMillis() - startCycle) / 1000, 1L);
+				if (logger.isDebugEnabled()) {
+					logger.debug("Finished collecting devices statistics cycle at " + new Date() + ", total duration: " + lastMonitoringCycleDuration);
+				}
+
+					updateValidRetrieveStatisticsTimestamp();
 			}
 			// Finished collecting
 		}
@@ -233,7 +253,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void retrieveDeviceSensorInformation() {
 		try {
-			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.LIST_DEVICE_SENSOR, this.getLogin()), JsonNode.class);
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.LIST_DEVICE_SENSOR, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.DATA)) {
 				JsonNode dataArray = response.get(NeatPulseConstant.DATA);
 				mapOfDeviceIdAndDeviceSensor.clear();
@@ -267,7 +287,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			if (StringUtils.isNullOrEmpty(roomId) || mapRoomIdAndDeviceSensor.containsKey(roomId)) {
 				return;
 			}
-            JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
+            JsonNode response = this.doGet(String.format(NeatPulseCommand.ROOM_SENSOR, this.getLogin(), roomId), JsonNode.class);
             if (response != null && response.has(NeatPulseConstant.ROOM_DATA)) {
                 JsonNode dataNode = response.get(NeatPulseConstant.ROOM_DATA);
                 if (dataNode != null && dataNode.has("data")) {
@@ -294,6 +314,21 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * is set to currentTime + 30s, at the same time, calling {@link #retrieveMultipleStatistics()} and updating the
 	 */
 	private long nextDevicesCollectionIterationTimestamp;
+
+	/**
+	 * How much time last monitoring cycle took to finish
+	 */
+	private long lastMonitoringCycleDuration = 1L;
+
+	/**
+	 * Adapter metadata properties - adapter version and build date
+	 */
+	private Properties adapterProperties;
+
+	/**
+	 * Device adapter instantiation timestamp.
+	 */
+	private long adapterInitializationTimestamp;
 
 	/**
 	 * This parameter holds timestamp of when we need to stop performing API calls
@@ -391,11 +426,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	private int countRoom = 0;
 
 	/**
-	 * time of polling cycle
-	 */
-	private Integer devicePollingInterval;
-
-	/**
 	 * number of threads
 	 */
 	private Integer numberThreads;
@@ -434,49 +464,6 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		Arrays.asList(historicalProperties.split(",")).forEach(propertyName -> {
 			this.historicalProperties.add(propertyName.trim());
 		});
-	}
-
-	/**
-	 *
-	 */
-	private String baseUri = "";
-
-	/**
-	 * Retrieves {@link #baseUri}
-	 *
-	 * @return value of {@link #baseUri}
-	 */
-	@Override
-	public String getBaseUri() {
-		return baseUri;
-	}
-
-	/**
-	 * Sets {@link #baseUri} value
-	 *
-	 * @param baseUri new value of {@link #baseUri}
-	 */
-	@Override
-	public void setBaseUri(String baseUri) {
-		this.baseUri = baseUri;
-	}
-
-	/**
-	 * Retrieves {@link #devicePollingInterval}
-	 *
-	 * @return value of {@link #devicePollingInterval}
-	 */
-	public Integer getDevicePollingInterval() {
-		return devicePollingInterval;
-	}
-
-	/**
-	 * Sets {@link #devicePollingInterval} value
-	 *
-	 * @param devicePollingInterval new value of {@link #devicePollingInterval}
-	 */
-	public void setDevicePollingInterval(Integer devicePollingInterval) {
-		this.devicePollingInterval = devicePollingInterval;
 	}
 
 	/**
@@ -549,6 +536,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @throws IOException If an I/O error occurs while loading the properties mapping YAML file.
 	 */
 	public NeatPulseCommunicator() throws IOException {
+		adapterProperties = new Properties();
+		adapterProperties.load(getClass().getResourceAsStream("/version.properties"));
 		this.setTrustAllCertificates(true);
 	}
 
@@ -562,17 +551,17 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			if (StringUtils.isNullOrEmpty(this.getLogin())) {
 				throw new ResourceNotReachableException("Please check Organization Id in Username field");
 			}
-			if (devicePollingInterval == null || devicePollingInterval < 5) {
-				devicePollingInterval = 5;
-			}
 			Map<String, String> statistics = new HashMap<>();
+			Map<String, String> dynamicStatistics = new HashMap<>();
 			ExtendedStatistics extendedStatistics = new ExtendedStatistics();
+			retrieveMetadata(statistics, dynamicStatistics);
 			retrieveSystemInfo();
 			retrieveRoomInfo();
 			retrieveDeviceSensorInformation();
 			filterRoomName();
 			populateSystemInfo(statistics);
 			extendedStatistics.setStatistics(statistics);
+			extendedStatistics.setDynamicStatistics(dynamicStatistics);
 			localExtendedStatistics = extendedStatistics;
 		} finally {
 			reentrantLock.unlock();
@@ -770,6 +759,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		if (logger.isDebugEnabled()) {
 			logger.debug("Internal init is called.");
 		}
+		adapterInitializationTimestamp = System.currentTimeMillis();
 		executorService = Executors.newFixedThreadPool(1);
 		executorService.submit(deviceDataLoader = new NeatPulseDataLoader());
 		super.internalInit();
@@ -810,6 +800,34 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	}
 
 	/**
+	 * Retrieves metadata information and updates the provided statistics and dynamic map.
+	 *
+	 * @param stats the map where statistics will be stored
+	 * @param dynamicStatistics the map where dynamic statistics will be stored
+	 */
+	private void retrieveMetadata(Map<String, String> stats, Map<String, String> dynamicStatistics) {
+		try {
+			dynamicStatistics.put(NeatPulseConstant.MONITORING_CYCLE_DURATION, String.valueOf(lastMonitoringCycleDuration));
+			stats.put(NeatPulseConstant.ADAPTER_VERSION,
+					getDefaultValueForNullData(adapterProperties.getProperty("aggregator.version")));
+			stats.put(NeatPulseConstant.ADAPTER_BUILD_DATE,
+					getDefaultValueForNullData(adapterProperties.getProperty("aggregator.build.date")));
+			long adapterUptime = System.currentTimeMillis() - adapterInitializationTimestamp;
+
+			stats.put(NeatPulseConstant.ADAPTER_UPTIME_MIN, String.valueOf(adapterUptime / (1000 * 60)));
+			stats.put(NeatPulseConstant.ADAPTER_UPTIME, normalizeUptime(adapterUptime / 1000));
+			try {
+				stats.put(NeatPulseConstant.SYSTEM_MONITORING_CYCLE, String.valueOf(getMonitoringRate()));
+			} catch (NoSuchMethodError nsme) {
+				logger.warn("Unsupported feature: getMonitoringRate isn't available on current Cloud Connector version.", nsme);
+			}
+			dynamicStatistics.put(NeatPulseConstant.MONITORED_DEVICES_TOTAL, String.valueOf(deviceList.size()));
+		} catch (Exception e) {
+			logger.error("Failed to populate metadata information", e);
+		}
+	}
+
+	/**
 	 * Sends a command to control a device with the specified parameters.
 	 *
 	 * @param deviceId The ID of the device to control.
@@ -819,7 +837,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void sendCommandToControlDevice(String deviceId, String name, String fieldName, Object value) {
 		try {
-			String command = String.format(baseUri + "/" + NeatPulseCommand.CONTROL_DEVICE, this.getLogin(), deviceId);
+			String command = String.format(NeatPulseCommand.CONTROL_DEVICE, this.getLogin(), deviceId);
 			Map<String, Object> bodyJson = new HashMap<>();
 			bodyJson.put(fieldName, value);
 			JsonNode response = this.doPost(command, bodyJson, JsonNode.class);
@@ -847,7 +865,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void controlRebootDevice(String deviceId) {
 		try {
-			String command = String.format(baseUri + "/" + NeatPulseCommand.REBOOT_DEVICE, this.getLogin(), deviceId);
+			String command = String.format(NeatPulseCommand.REBOOT_DEVICE, this.getLogin(), deviceId);
 			Map<String, String> data = new HashMap<>();
 			JsonNode response = this.doPost(command, data, JsonNode.class);
 			if (response == null) {
@@ -870,7 +888,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void retrieveSystemInfo() throws Exception {
 		try {
-			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_DEVICE_ID_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ENDPOINTS) && response.get(NeatPulseConstant.ENDPOINTS).isArray()) {
 				deviceList.clear();
 				JsonNode jsonNode = response.get(NeatPulseConstant.ENDPOINTS);
@@ -899,7 +917,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 */
 	private void retrieveRoomInfo() {
 		try {
-			JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
+			JsonNode response = this.doGet(String.format(NeatPulseCommand.ALL_ROOM_COMMAND, this.getLogin()), JsonNode.class);
 			if (response != null && response.has(NeatPulseConstant.ROOMS) && response.get(NeatPulseConstant.ROOMS).isArray()) {
 				mapOfRoomIdAndRoomName.clear();
 				countRoom = response.get(NeatPulseConstant.ROOMS).size();
@@ -920,9 +938,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param stats The map to populate with system information.
 	 */
 	private void populateSystemInfo(Map<String, String> stats) {
-		stats.put("NumberOfDevices", String.valueOf(deviceList.size()));
 		stats.put("NumberOfPulseRooms", String.valueOf(countRoom));
-		stats.put("DevicePollingInterval(minutes)", String.valueOf(devicePollingInterval));
 	}
 
 	/**
@@ -1051,7 +1067,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device.
 	 */
 	private void retrieveDeviceInfo(String deviceId) throws Exception {
-        JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+        JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_INFO_COMMAND, this.getLogin(), deviceId), JsonNode.class);
         if (response != null) {
             Map<String, String> mappingValue = new HashMap<>();
             for (DeviceInfo item : DeviceInfo.values()) {
@@ -1074,7 +1090,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	 * @param deviceId The ID of the device to retrieve settings for.
 	 */
 	private void retrieveDeviceSettings(String deviceId) throws Exception  {
-        JsonNode response = this.doGet(String.format(baseUri + "/" + NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
+        JsonNode response = this.doGet(String.format(NeatPulseCommand.GET_DEVICE_SETTINGS_COMMAND, this.getLogin(), deviceId), JsonNode.class);
         if (response != null) {
             Map<String, String> mappingValue = new HashMap<>();
             for (DeviceSettings item : DeviceSettings.values()) {
@@ -1756,5 +1772,37 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 
 			advancedControllableProperties.add(property);
 		}
+	}
+
+	/**
+	 * Uptime is received in seconds, need to normalize it and make it human-readable, like
+	 * 1 day 5 hour 12 minute 55 minute
+	 * Incoming parameter is may have a decimal point, so in order to safely process this - it's rounded first.
+	 * We don't need to add a segment of time if it's 0.
+	 *
+	 * @param uptimeSeconds value in seconds
+	 * @return string value of format 'x d x hr x min x sec'
+	 */
+	public static String normalizeUptime(long uptimeSeconds) {
+		StringBuilder normalizedUptime = new StringBuilder();
+
+		long seconds = uptimeSeconds % 60;
+		long minutes = uptimeSeconds % 3600 / 60;
+		long hours = uptimeSeconds % 86400 / 3600;
+		long days = uptimeSeconds / 86400;
+
+		if (days > 0) {
+			normalizedUptime.append(days).append(" d ");
+		}
+		if (hours > 0) {
+			normalizedUptime.append(hours).append(" hr ");
+		}
+		if (minutes > 0) {
+			normalizedUptime.append(minutes).append(" min ");
+		}
+		if (seconds > 0 || normalizedUptime.isEmpty()) {
+			normalizedUptime.append(seconds).append(" sec");
+		}
+		return normalizedUptime.toString().trim();
 	}
 }
