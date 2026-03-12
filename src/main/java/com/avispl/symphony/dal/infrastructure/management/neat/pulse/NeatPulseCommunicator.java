@@ -224,7 +224,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				}
 
 				try {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + calculateMonitoringCycleInterval(systemMonitoringCycleInterval);
+					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + systemMonitoringCycleInterval
+							+ (getMonitoringRate() - 1) * TimeUnit.SECONDS.toMillis(150);
 				} catch (NoSuchMethodError nsme) {
 					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + systemMonitoringCycleInterval;
 					logger.warn("Unsupported feature: getMonitoringRate isn't available on current Cloud Connector version.", nsme);
@@ -1803,21 +1804,5 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 			normalizedUptime.append(seconds).append(" sec");
 		}
 		return normalizedUptime.toString().trim();
-	}
-
-	/**
-	 * Calculates the monitoring cycle interval in milliseconds based on the monitoring rate.
-	 *
-	 * <p>The total interval is calculated by adding an incremental duration
-	 * (2.5 minutes or 150 seconds per monitoring rate level after the first)
-	 * to the provided base interval.</p>
-	 *
-	 * @param baseIntervalMillis the base monitoring interval in milliseconds
-	 * @return the calculated monitoring cycle interval in milliseconds
-	 */
-	private long calculateMonitoringCycleInterval(long baseIntervalMillis) {
-		var additionalIntervalMillis = (this.getMonitoringRate() - 1) * TimeUnit.SECONDS.toMillis(150);
-
-		return baseIntervalMillis + additionalIntervalMillis;
 	}
 }
