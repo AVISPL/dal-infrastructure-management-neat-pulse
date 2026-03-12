@@ -22,7 +22,11 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TimeZone;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
@@ -164,10 +168,10 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	class NeatPulseDataLoader implements Runnable {
 		private volatile boolean inProgress;
 		/**
-		 * Current monitoring cycle interval - amount of time that passes between 2 consecutive getMultipleStatistics calls
-		 * 60000ms by default
-		 * */
-		private final long systemMonitoringCycleInterval = 60000L;
+		 * Current monitoring cycle interval - amount of time that passes between two consecutive {@code getMultipleStatistics} calls.
+		 * 5 minutes (300000 ms) by default, which is the minimum allowed interval due to rate limiting constraints.
+		 */
+		private final long systemMonitoringCycleInterval = TimeUnit.MINUTES.toMillis(5);
 
 		public NeatPulseDataLoader() {
 			inProgress = true;
@@ -220,7 +224,8 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 				}
 
 				try {
-					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + (getMonitoringRate() * systemMonitoringCycleInterval);
+					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + systemMonitoringCycleInterval
+							+ (getMonitoringRate() - 1) * TimeUnit.SECONDS.toMillis(150);
 				} catch (NoSuchMethodError nsme) {
 					nextDevicesCollectionIterationTimestamp = System.currentTimeMillis() + systemMonitoringCycleInterval;
 					logger.warn("Unsupported feature: getMonitoringRate isn't available on current Cloud Connector version.", nsme);
@@ -313,7 +318,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 	/**
 	 * How much time last monitoring cycle took to finish
 	 */
-	private long lastMonitoringCycleDuration;
+	private long lastMonitoringCycleDuration = 1L;
 
 	/**
 	 * Adapter metadata properties - adapter version and build date
@@ -1795,7 +1800,7 @@ public class NeatPulseCommunicator extends RestCommunicator implements Aggregato
 		if (minutes > 0) {
 			normalizedUptime.append(minutes).append(" min ");
 		}
-		if (seconds > 0) {
+		if (seconds > 0 || normalizedUptime.isEmpty()) {
 			normalizedUptime.append(seconds).append(" sec");
 		}
 		return normalizedUptime.toString().trim();
