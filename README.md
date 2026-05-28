@@ -116,13 +116,13 @@ Supported device models and their sensor capabilities:
 
 If none of the recommended steps help, please enter an SOS ticket at {https://avi-spl.atlassian.net/servicedesk/customer/portals}
 
-## What Melody can do with it:
+## What AI Assistant can do with it:
 - Find Neat Pulse Aggregated Devices (Neat Pulse Aggregator as Monitoring Proxy)
 - Verify Neat Pulse Aggregator configuration
 - Check device online/offline status (Connected, deviceOnline properties)
 - Check room sensor readings (temperature, CO2, humidity, air quality, occupancy)
 
-## What Melody cannot do with it:
+## What AI Assistant cannot do with it:
 - Provision the devices
 - Generate or rotate API tokens (must be done in the Neat Pulse UI)
 - Push firmware updates directly
