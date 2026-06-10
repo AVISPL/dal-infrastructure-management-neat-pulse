@@ -4,14 +4,14 @@ This document covers Neat Pulse Aggregator Capabilities and Configuration.
 Symphony integrates with Neat Pulse to provide comprehensive monitoring and control of Neat devices across an organization.
 Main features are: real-time device health monitoring, room sensor data (air quality, occupancy, temperature), firmware tracking, call status, and device settings management.
 
-## Main use cases
+## Main use cases for Neat Pulse Integration
 - **Monitor** Neat device health, connection status, firmware versions, and call activity
 - **Track** individual device details - IP address, serial number, primary mode, controller mode, in-call status
 - **Manage** device settings such as display preferences, accessibility options, system settings, and time/language configuration
 - **Sense** room environment - CO2, humidity, temperature, ambient light, people count, and VOC levels
 - **Inventory** keep Neat devices and their associated Pulse rooms in check
 
-## Prerequisites and where to start
+## Prerequisites for Neat Pulse Integration
 Neat Pulse Aggregator communicates with the Neat Pulse API on behalf of an API token, generated from the Neat Pulse user interface after creating an API integration.
 
 Required credentials are:
@@ -19,13 +19,16 @@ Required credentials are:
 - API Token -> generated from the Neat Pulse UI, used as the Password in Symphony device configuration
 
 The current Neat Pulse API base URL is: https://api.pulse.neat.no/
-Note: The old base URL (https://pulse.neat.no/api) is no longer supported as of July 1, 2025. If the management address pulse.neat.no is used, an adapter property baseUri must be set to "api". If api.pulse.neat.no is used, no additional configuration is needed.
 
 ## Neat Pulse Device Configuration and Provisioning
+
+Note: The prerequisites below describe the requirements for a successful Neat Pulse Integration setup. They are not to be infered as troubleshooting checks and should not be used when diagnosing specific errors unless a troubleshooting entry (provided in the Troubleshooting section) explicitly references them.
+
 Once the API token is generated in Neat Pulse, use the Organization Id and token for the Symphony device configuration.
 
 Once the Neat Pulse device is created with Monitoring Service -> Advanced Monitoring, HTTPS management protocol must be selected.
-- Management Address: api.pulse.neat.no (or pulse.neat.no with baseUri adapter property set to "api")
+
+- Management Address: The hostname of Neat Pulse API cloud (example: pulse.neat.no)
 - Protocol: HTTPs
 - Username: Organization Id
 - Password: API Token
@@ -35,21 +38,21 @@ When the device is configured, saved and set active, the Neat Pulse Aggregator w
 By default, unprovisioned devices will appear on Aggregated Devices -> Unprovisioned Devices tab.
 To provision a device, click the (+) icon, fill in Type, Category (Single Codecs), Manufacturer (Neat), and Model (e.g. Neat Bar), then click Import and confirm.
 
-Devices and available device data can be tuned by adapter configuration properties:
+**Adapter configuration properties** - For filtering Device(s) and component(s):
+
+Devices and available device data can be tuned by adapter configuration properties.
 
 | Property | Description |
 |---|---|
 | filterByPulseRoomName | Filter devices by Pulse Room name(s). Only devices belonging to specified rooms and their Room Sensor Information will be displayed in Symphony. |
 | filterByExcludingPulseRoomName | Exclude specific Pulse Rooms. Only applies when filterByPulseRoomName is blank. | 
-| DevicePollingInterval(minutes) | Time in minutes for the adapter to refresh device properties in Symphony. Default 5 min (minimum value) |
-| baseUri | Required only when management address is pulse.neat.no |
 | historicalProperties | Historical/graphable sensor properties: Temperature(C), CO2eq(ppm), RelativeHumidity(%), AmbientLight(lx), PeopleCount, VOC(ppb), VOCIndex. |
 
-Note: The Neat Pulse API enforces a rate limit of 10 requests per enrolled device per 5 minutes (200 requests per 5 minutes for organizations with fewer than 20 devices), and a maximum of 15 requests/second per integration token. Symphony requires 3 requests per device per polling interval. The minimum polling interval is therefore 5 minutes. If the rate limit is exceeded, Symphony will display an error and an HTTP 429 will be returned.
+Note: The Neat Pulse API enforces a rate limit of 10 requests per enrolled device per 5 minutes (200 requests per 5 minutes for organizations with fewer than 20 devices), and a maximum of 15 requests/second per integration token. If the rate limit is exceeded, Symphony will display an error and an HTTP 429 will be returned.
 
 For detailed information on the aggregator and its configuration, please refer to our knowledgebase -> https://symphony.knowledgeowl.com/help/neat-pulse-technical-breakdown
 
-## Available Monitored Data
+## Available Monitored Data for the Neat Pulse Integration
 Neat Pulse Aggregator monitored data consists of 2 parts: Aggregator extended properties and Aggregated Device extended properties.
 
 Aggregator properties:
@@ -94,19 +97,25 @@ Supported device models and their sensor capabilities:
 | Neat Board Pro | K1 | NF23K1 | Relative Humidity, Temperature, VOC Index, Ambient Light, People Count |
 | Neat Center | L1 | NF23L1 | People Count |
 
-## Troubleshooting
+## Troubleshooting for the Neat Pulse Integration
+
+**Troubleshooting guidance**
+- If an error occurs, focus only on troubleshooting steps that are provided in the section below.
+- Do not include prerequisite/setup information.
+- Do not add unrelated configuration details from other sections.
+- If the document does not provide a direct error troubleshooting step, state that the document does not contain enough guidance for that specific issue.
+
 **Login Error**
 - Check that the Organization Id (username) and API Token (password) are correct in the Symphony device configuration
 - Verify that the API token is still active and has not expired in the Neat Pulse UI
-- Ensure the management address is set to api.pulse.neat.no (or pulse.neat.no with baseUri adapter property = "api")
 
 **API Error / Rate Limit (HTTP 429)**
 - Check the API error description in Symphony
+- Verify that the API token is still active and has not expired in the Neat Pulse UI
 - If the rate limit is exceeded, wait up to 5 minutes before retrying - Symphony will display "You have exceeded the maximum rate limit of 10 requests per enrolled device within 5 minutes."
-- Consider increasing the DevicePollingInterval(minutes) adapter property to reduce API usage
 
 **Link Error / Ping Timeout**
-- Make sure your Cloud Connector can reach api.pulse.neat.no on port 443
+- Make sure your Cloud Connector can reach Neat Pulse API host on port 443
 - Check the Ping Protocol in the Symphony Neat Pulse Aggregator device configuration
 - Try switching between ICMP/TCP modes, as certain protocols may be blocked by proxy settings
 
@@ -114,15 +123,15 @@ Supported device models and their sensor capabilities:
 - If sensor or display properties are missing for a device, verify the device model - not all properties are supported on all models (e.g. Neat Pad does not support ScreenStandby, AutoWakeup, DisplayPreference, HDMICECControl, or RoomSensorInformation)
 - If devices are not appearing, check the filterByPulseRoomName and filterByExcludingPulseRoomName adapter properties to ensure the desired rooms are not filtered out
 
-If none of the recommended steps help, please enter an SOS ticket at {https://avi-spl.atlassian.net/servicedesk/customer/portals}
+If none of the recommended steps help, please raise an SOS ticket at: https://avi-spl.atlassian.net/servicedesk/customer/portals
 
-## What AI Assistant can do with it:
+## What AI Assistant can do with the Neat Pulse Integration:
 - Find Neat Pulse Aggregated Devices (Neat Pulse Aggregator as Monitoring Proxy)
 - Verify Neat Pulse Aggregator configuration
 - Check device online/offline status (Connected, deviceOnline properties)
 - Check room sensor readings (temperature, CO2, humidity, air quality, occupancy)
 
-## What AI Assistant cannot do with it:
+## What AI Assistant cannot do with the Neat Pulse Integration:
 - Provision the devices
 - Generate or rotate API tokens (must be done in the Neat Pulse UI)
 - Push firmware updates directly
